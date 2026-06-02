@@ -25,6 +25,34 @@ jobs:
       - name: Setup Helm
         uses: azure/setup-helm@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Build frontend
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package frontend
+        run: |
+          set -euo pipefail
+
+          if [ ! -d ui/dist ]; then
+            echo "frontend dist not found under ui/dist"
+            exit 1
+          fi
+
+          cd ui/dist
+          zip -r ../../frontend.zip .
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -78,4 +106,5 @@ jobs:
           zpk login --username="${ZPK_DOCKER_USERNAME}" --password="${ZPK_DOCKER_PASSWORD}" --host="${ZPK_HOST}"
           zpk use "${ZPK_ARTIFACT}"
           zpk attach add --path="${HELM_PACKAGE}" --type=helm
+          zpk attach add --path="frontend.zip" --type=frontend
           zpk push
