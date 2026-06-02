@@ -4,7 +4,7 @@ WORKDIR /home
 COPY . .
 RUN rm /home/docker -rf
 
-RUN export GOPROXY=https://goproxy.cn,direct && export CGO_ENABLED=0 && export GOARCH=amd64 && export GOOS=linux && go mod download && go build -o /usr/bin/rangine *.go
+RUN export GOPROXY=https://goproxy.cn,direct && export CGO_ENABLED=0 && export GOARCH=amd64 && export GOOS=linux && go mod tidy && go build -o /usr/bin/rangine *.go
 
 FROM busybox
 
