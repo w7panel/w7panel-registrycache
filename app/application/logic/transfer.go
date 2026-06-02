@@ -1,0 +1,271 @@
+package logic
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"gitee.com/we7coreteam/w7-registry-cache/common/service/registry/client"
+	"github.com/docker/distribution"
+	"github.com/docker/distribution/manifest/manifestlist"
+	"github.com/panjf2000/ants/v2"
+)
+
+var transferMap sync.Map
+var transferChan chan TransferInfo
+var transferPool *ants.PoolWithFunc
+
+func init() {
+	transferChan = make(chan TransferInfo, 1000)
+
+	pool, err := ants.NewPoolWithFunc(100, func(transfer interface{}) {
+		Transfer{}.transfer(transfer.(TransferInfo))
+	})
+	if err != nil {
+		panic(err)
+	}
+	transferPool = pool
+}
+
+const TransferTypeBlob = int8(1)
+const TransferTypeManifest = int8(2)
+
+type TransferInfo struct {
+	CacheSetting            RegistryCacheSetting
+	SourceRegistryServerUrl string
+	RepositoryName          string
+	Reference               string
+	Type                    int8
+	CurReTryNum             int8
+}
+type SyncWriter struct {
+	buffer           [][]byte
+	startOffset      int64
+	endOffset        int64
+	RegistryClient   client.Client
+	RepositoryName   string
+	RepositoryDigest string
+	location         string
+}
+
+func (w *SyncWriter) Write(p []byte) (n int, err error) {
+	w.buffer = append(w.buffer, p)
+
+	if len(w.buffer) != 2 {
+		if w.endOffset == 0 {
+			w.endOffset = int64(len(p))
+			w.startOffset = 0
+		}
+	} else {
+		location, _, err := w.RegistryClient.PushBlobChunk(w.RepositoryName, w.RepositoryDigest, 2<<2<<20, bytes.NewBuffer(w.buffer[0]), w.startOffset, w.endOffset, w.location)
+		if err != nil {
+			return 0, err
+		}
+		w.location = location
+		w.startOffset = w.endOffset
+		w.endOffset = w.startOffset + int64(len(w.buffer[1]))
+		w.buffer = w.buffer[1:]
+	}
+
+	return len(p), nil
+}
+
+func (w *SyncWriter) End() error {
+	if len(w.buffer) == 1 {
+		_, _, err := w.RegistryClient.PushBlobChunk(w.RepositoryName, w.RepositoryDigest, w.endOffset+1, bytes.NewBuffer(w.buffer[0]), w.startOffset, w.endOffset, w.location)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+type Transfer struct {
+	logic
+}
+
+func (l Transfer) deduplicateBlobs(blobs []distribution.Descriptor) []distribution.Descriptor {
+	seen := make(map[string]bool)
+	result := []distribution.Descriptor{}
+
+	for _, blob := range blobs {
+		digestStr := blob.Digest.String()
+		if !seen[digestStr] {
+			seen[digestStr] = true
+			result = append(result, blob)
+		}
+	}
+
+	return result
+}
+
+func (l Transfer) Push(transferInfo TransferInfo) {
+	_, exists := transferMap.LoadOrStore(transferInfo.CacheSetting.Host+transferInfo.Reference, transferInfo)
+	if exists {
+		return
+	}
+
+	transferChan <- transferInfo
+}
+
+func (l Transfer) transfer(transferInfo TransferInfo) {
+	slog.Info("transfer begin", "transfer_info", transferInfo)
+
+	defer transferMap.Delete(transferInfo.CacheSetting.Host + transferInfo.Reference)
+
+	err := l.transferImage(transferInfo)
+
+	if err == nil {
+		err = Storage{}.UpdateRepositoryFile(transferInfo.CacheSetting.Host, transferInfo.RepositoryName, transferInfo.Reference)
+	} else if transferInfo.CurReTryNum < 10 {
+		go func() {
+			time.Sleep(6 * time.Second)
+			transferInfo.CurReTryNum++
+			slog.Info("transfer failed retry", "transfer_info", transferInfo)
+			l.Push(transferInfo)
+		}()
+	}
+
+	slog.Info("transfer CompleteMultipartUpload", "transfer_info", transferInfo, "err", err)
+}
+
+func (l Transfer) transferImage(transferInfo TransferInfo) error {
+	sourceRegistryClient := RegistryClient{}.GetRegistryClient(transferInfo.CacheSetting.Host, transferInfo.SourceRegistryServerUrl, nil)
+	if sourceRegistryClient == nil {
+		return errors.New("source registry client is nil")
+	}
+
+	cacheRegistryClient := RegistryClient{}.GetRegistryClient(transferInfo.CacheSetting.Host, transferInfo.CacheSetting.CacheRegistry.ServerUrl, nil)
+	if cacheRegistryClient == nil {
+		return errors.New("cache registry client is nil")
+	}
+
+	sourceManifest, err := Storage{}.DownloadManifest(context.Background(), sourceRegistryClient.PullManifest, transferInfo.RepositoryName, transferInfo.Reference)
+	if err != nil {
+		return err
+	}
+
+	return l.copyImage(sourceRegistryClient, cacheRegistryClient, sourceManifest, transferInfo)
+}
+
+func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest distribution.Manifest, transferInfo TransferInfo) error {
+	repoName := transferInfo.RepositoryName
+	tag := transferInfo.Reference
+	childManifest := make(map[string]distribution.Manifest)
+	blobs := make([]distribution.Descriptor, 0)
+	blobs = append(blobs, sourceManifest.References()...)
+	_, ok := sourceManifest.(*manifestlist.DeserializedManifestList)
+	if ok {
+		for _, item := range sourceManifest.(*manifestlist.DeserializedManifestList).Manifests {
+			cmanifest, err := Storage{}.DownloadManifest(context.Background(), sourceRepo.PullManifest, repoName, item.Digest.String())
+			if err != nil {
+				slog.Error("transfer pull platform manifest error", "repoName", repoName, "tag", tag, "err", err)
+				return err
+			}
+
+			childManifest[item.Digest.String()] = cmanifest
+			blobs = append(blobs, cmanifest.References()...)
+		}
+	}
+
+	// 同步所有blobs
+	dedupedBlobs := l.deduplicateBlobs(blobs)
+	targetRepoName := repoName
+	targetRepoName = l.RebuildImageName(targetRepoName, transferInfo.CacheSetting.CacheRegistry.CacheNamespacePrefix)
+
+	slog.Info("transfer blobs", "repoName", repoName, "targetRepoName", targetRepoName, "tag", tag, "blobs", dedupedBlobs)
+	if err := l.copyBlobs(sourceRepo, targetRepo, repoName, targetRepoName, dedupedBlobs, transferInfo.CurReTryNum == 0); err != nil {
+		return fmt.Errorf("同步blobs失败: %v", err)
+	}
+
+	for digest, item := range childManifest {
+		mediaType, payload, err := item.Payload()
+		if err != nil {
+			return err
+		}
+		_, err = targetRepo.PushManifest(targetRepoName, digest, mediaType, payload)
+		slog.Info("transfer push platform manifest", "repoName", targetRepoName, "tag", tag, "digest", digest, "err", err)
+		if err != nil {
+			return err
+		}
+	}
+
+	mediaType, payload, err := sourceManifest.Payload()
+	if err != nil {
+		return err
+	}
+	_, err = targetRepo.PushManifest(targetRepoName, tag, mediaType, payload)
+	slog.Info("transfer push platform manifest", "repoName", targetRepoName, "tag", tag, "err", err)
+	return err
+}
+
+func (l Transfer) copyBlobs(sourceRepo, targetRepo client.Client, sourceRepoName string, targetRepoName string, blobs []distribution.Descriptor, forceOverrideBlob bool) error {
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(blobs))
+	sem := make(chan struct{}, min(10, len(blobs))) // 限制blob并发数
+
+	for _, blob := range blobs {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(blob distribution.Descriptor) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+
+			if !forceOverrideBlob {
+				exists, _, _, _ := targetRepo.BlobExist(targetRepoName, blob.Digest.String())
+				if exists {
+					return
+				}
+			}
+
+			syncWriter := &SyncWriter{
+				RegistryClient:   targetRepo,
+				RepositoryName:   targetRepoName,
+				RepositoryDigest: blob.Digest.String(),
+			}
+			err := Storage{}.DownloadBlob(context.Background(), sourceRepo.PullBlobChunk, sourceRepoName, blob.Digest.String(), blob.Size, syncWriter, false)
+			if err == nil {
+				err = syncWriter.End()
+			}
+			if err != nil {
+				slog.Error("transfer download blob error", "repoName", sourceRepoName, "blob", blob.Digest.String(), "err", err)
+				errChan <- err
+			}
+		}(blob)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// 检查错误
+	for err := range errChan {
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (l Transfer) Loop() {
+	go func() {
+		for {
+			select {
+			case transferInfo := <-transferChan:
+				err := transferPool.Invoke(transferInfo)
+				if err != nil {
+					slog.Error("transferPool Invoke", "err", err, "transferInfo", transferInfo)
+					return
+				}
+			}
+		}
+	}()
+}

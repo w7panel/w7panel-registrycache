@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      ZPK_HOST: zpk.w7.cc
+      ZPK_ARTIFACT: w7-registrycache
+      IMAGE_PUSH_REGISTRY: ${{ vars.IMAGE_PUSH_REGISTRY || 'ghcr.io' }}
+      HELM_PACKAGE_IMAGE_REGISTRY: ${{ vars.HELM_PACKAGE_IMAGE_REGISTRY || 'ghcr.registry.cdn.w7.cc' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Build frontend
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package frontend
+        run: |
+          set -euo pipefail
+
+          if [ ! -d ui/dist ]; then
+            echo "frontend dist not found under ui/dist"
+            exit 1
+          fi
+
+          cd ui/dist
+          zip -r ../../frontend.zip .
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.IMAGE_PUSH_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish image and Helm package
+        run: |
+          set -euo pipefail
+
+          RELEASE_TAG="${GITHUB_REF_NAME}"
+          RELEASE_VERSION="${RELEASE_TAG#v}"
+          IMAGE_NAME="${GITHUB_REPOSITORY,,}"
+          IMAGE_REPOSITORY="${IMAGE_PUSH_REGISTRY}/${IMAGE_NAME}"
+          HELM_PACKAGE_IMAGE_REPOSITORY="${HELM_PACKAGE_IMAGE_REGISTRY}/${IMAGE_NAME}"
+
+          make publish \
+            IMAGE_REPOSITORY="${IMAGE_REPOSITORY}" \
+            IMAGE_TAG="${RELEASE_TAG}" \
+            HELM_PACKAGE_IMAGE_REPOSITORY="${HELM_PACKAGE_IMAGE_REPOSITORY}" \
+            HELM_PACKAGE_IMAGE_TAG="${RELEASE_TAG}" \
+            HELM_CHART_VERSION="${RELEASE_VERSION}" \
+            HELM_APP_VERSION="${RELEASE_TAG}"
+
+      - name: Push zpk
+        env:
+          ZPK_DOCKER_USERNAME: ${{ secrets.ZPK_DOCKER_USERNAME }}
+          ZPK_DOCKER_PASSWORD: ${{ secrets.ZPK_DOCKER_PASSWORD }}
+        run: |
+          sudo curl -L --fail -o /usr/local/bin/zpk https://github.com/w7panel/w7panel-zpk/releases/download/latest/zpk_linux_amd64
+          sudo chmod +x /usr/local/bin/zpk
+
+          set -euo pipefail
+
+          if [ -z "${ZPK_DOCKER_USERNAME}" ]; then
+            echo "ZPK_DOCKER_USERNAME secret is required"
+            exit 1
+          fi
+          if [ -z "${ZPK_DOCKER_PASSWORD}" ]; then
+            echo "ZPK_DOCKER_PASSWORD secret is required"
+            exit 1
+          fi
+
+          HELM_PACKAGE="$(ls charts/registrycache-*.tgz | head -n 1)"
+          if [ -z "${HELM_PACKAGE}" ]; then
+            echo "helm package not found under charts/"
+            exit 1
+          fi
+
+          zpk login --username="${ZPK_DOCKER_USERNAME}" --password="${ZPK_DOCKER_PASSWORD}" --host="${ZPK_HOST}"
+          zpk use "${ZPK_ARTIFACT}"
+          zpk attach add --path="${HELM_PACKAGE}" --type=helm
+          zpk attach add --path="frontend.zip" --type=frontend
+          zpk push

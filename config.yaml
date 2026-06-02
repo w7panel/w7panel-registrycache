@@ -1,0 +1,32 @@
+app:
+  name: w7-registry-cache
+  env: ${APP_ENV-release}
+  server: http
+server:
+  http:
+    host: ${W7_REGISTRY_CACHE_SERVER_HOST-0.0.0.0}
+    port: ${W7_REGISTRY_CACHE_SERVER_PORT-8000}
+log:
+  default:
+    driver: stack
+    channels:
+      - file
+      - console
+  file:
+    driver: file
+    path: registry-cache.log
+    level: debug
+  console:
+    driver: console
+    level: debug
+database:
+  default:
+    driver: sqlite
+    db_name: ${SQLITE_DIR}registry-cache.db
+    charset: utf8mb4
+    show_sql: false
+    prefix: ims_
+    logger: db
+setting:
+  oauth_token: ${OAUTH_TOKEN-rogtdpxguk}
+  registry_cache_dir: ${REGISTRY_CACHE_DIR-/tmp/registry/cache}
