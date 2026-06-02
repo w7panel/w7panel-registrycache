@@ -174,7 +174,7 @@ export default {
         });
 
         return () => (<div className="padding-20">
-            <div className="mb-10 df jc-s">
+            <div className="mb-20 df jc-s">
                 <el-button
                     type="primary"
                     icon={() => <el-icon><Plus /></el-icon>}

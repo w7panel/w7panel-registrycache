@@ -94,7 +94,7 @@ export default {
         })
 
         return ()=>(<div class="padding-20">
-            {fromList ? <div class="mb-10">
+            {fromList ? <div class="mb-20">
                 {/* <el-page-header onBack={() => router.back()} title="返回" content="站点配置" /> */}
                     
                 <div class="com-back df ai-c">
