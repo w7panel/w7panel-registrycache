@@ -171,7 +171,7 @@ func (c Repository) handlerManifest(ctx *gin.Context, setting logic.RegistryCach
 
 	repositoryCacheRule, err := cacheRuleLogic.MatchRepositoryCacheRule(reqImageName, setting.RepositoryCacheRules)
 	slog.Info("manifest: match repositoryCacheRule", "params", params, "match_rule", repositoryCacheRule, "err", err)
-	if repositoryCacheRule.Enable {
+	if repositoryCacheRule != nil && repositoryCacheRule.Enable {
 		enableCache = repositoryCacheRule.Enable
 		cacheTtl = repositoryCacheRule.CacheTtl
 	}
@@ -341,7 +341,7 @@ func (c Repository) handlerBlob(ctx *gin.Context, setting logic.RegistryCacheSet
 
 	repositoryCacheRule, err := cacheRuleLogic.MatchRepositoryCacheRule(reqImageName, setting.RepositoryCacheRules)
 	slog.Info("blob: match repositoryCacheRule", "match_rule", repositoryCacheRule, "params", params, "err", err)
-	if repositoryCacheRule.Enable {
+	if repositoryCacheRule != nil && repositoryCacheRule.Enable {
 		enableCache = repositoryCacheRule.Enable
 	}
 

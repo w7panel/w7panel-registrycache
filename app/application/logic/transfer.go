@@ -12,6 +12,8 @@ import (
 	"gitee.com/we7coreteam/w7-registry-cache/common/service/registry/client"
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/manifest/manifestlist"
+	"github.com/docker/distribution/manifest/schema2"
+	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -53,21 +55,25 @@ type SyncWriter struct {
 }
 
 func (w *SyncWriter) Write(p []byte) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
 	w.buffer = append(w.buffer, p)
 
 	if len(w.buffer) != 2 {
-		if w.endOffset == 0 {
-			w.endOffset = int64(len(p))
+		if w.startOffset == 0 && w.endOffset == 0 {
+			w.endOffset = int64(len(p)) - 1
 			w.startOffset = 0
 		}
 	} else {
-		location, _, err := w.RegistryClient.PushBlobChunk(w.RepositoryName, w.RepositoryDigest, 2<<2<<20, bytes.NewBuffer(w.buffer[0]), w.startOffset, w.endOffset, w.location)
+		location, _, err := w.RegistryClient.PushBlobChunk(w.RepositoryName, w.RepositoryDigest, w.endOffset+2, bytes.NewBuffer(w.buffer[0]), w.startOffset, w.endOffset, w.location)
 		if err != nil {
 			return 0, err
 		}
 		w.location = location
-		w.startOffset = w.endOffset
-		w.endOffset = w.startOffset + int64(len(w.buffer[1]))
+		w.startOffset = w.endOffset + 1
+		w.endOffset = w.startOffset + int64(len(w.buffer[1])) - 1
 		w.buffer = w.buffer[1:]
 	}
 
@@ -104,8 +110,48 @@ func (l Transfer) deduplicateBlobs(blobs []distribution.Descriptor) []distributi
 	return result
 }
 
+func (l Transfer) copyableBlobDescriptors(descriptors []distribution.Descriptor) []distribution.Descriptor {
+	blobs := make([]distribution.Descriptor, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if l.isForeignLayer(descriptor.MediaType) {
+			slog.Warn("skip foreign layer", "digest", descriptor.Digest.String(), "mediaType", descriptor.MediaType)
+			continue
+		}
+		if l.isManifestDescriptor(descriptor.MediaType) {
+			continue
+		}
+		blobs = append(blobs, descriptor)
+	}
+
+	return blobs
+}
+
+func (l Transfer) isManifestDescriptor(mediaType string) bool {
+	switch mediaType {
+	case v1.MediaTypeImageIndex,
+		manifestlist.MediaTypeManifestList,
+		v1.MediaTypeImageManifest,
+		schema2.MediaTypeManifest:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l Transfer) isForeignLayer(mediaType string) bool {
+	switch mediaType {
+	case schema2.MediaTypeForeignLayer,
+		v1.MediaTypeImageLayerNonDistributable,
+		v1.MediaTypeImageLayerNonDistributableGzip,
+		v1.MediaTypeImageLayerNonDistributableZstd:
+		return true
+	default:
+		return false
+	}
+}
+
 func (l Transfer) Push(transferInfo TransferInfo) {
-	_, exists := transferMap.LoadOrStore(transferInfo.CacheSetting.Host+transferInfo.Reference, transferInfo)
+	_, exists := transferMap.LoadOrStore(l.transferKey(transferInfo), transferInfo)
 	if exists {
 		return
 	}
@@ -116,7 +162,7 @@ func (l Transfer) Push(transferInfo TransferInfo) {
 func (l Transfer) transfer(transferInfo TransferInfo) {
 	slog.Info("transfer begin", "transfer_info", transferInfo)
 
-	defer transferMap.Delete(transferInfo.CacheSetting.Host + transferInfo.Reference)
+	defer transferMap.Delete(l.transferKey(transferInfo))
 
 	err := l.transferImage(transferInfo)
 
@@ -132,6 +178,10 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 	}
 
 	slog.Info("transfer CompleteMultipartUpload", "transfer_info", transferInfo, "err", err)
+}
+
+func (l Transfer) transferKey(transferInfo TransferInfo) string {
+	return transferInfo.CacheSetting.Host + ":" + transferInfo.RepositoryName + ":" + transferInfo.Reference
 }
 
 func (l Transfer) transferImage(transferInfo TransferInfo) error {
@@ -158,7 +208,6 @@ func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest
 	tag := transferInfo.Reference
 	childManifest := make(map[string]distribution.Manifest)
 	blobs := make([]distribution.Descriptor, 0)
-	blobs = append(blobs, sourceManifest.References()...)
 	_, ok := sourceManifest.(*manifestlist.DeserializedManifestList)
 	if ok {
 		for _, item := range sourceManifest.(*manifestlist.DeserializedManifestList).Manifests {
@@ -169,8 +218,10 @@ func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest
 			}
 
 			childManifest[item.Digest.String()] = cmanifest
-			blobs = append(blobs, cmanifest.References()...)
+			blobs = append(blobs, l.copyableBlobDescriptors(cmanifest.References())...)
 		}
+	} else {
+		blobs = append(blobs, l.copyableBlobDescriptors(sourceManifest.References())...)
 	}
 
 	// 同步所有blobs

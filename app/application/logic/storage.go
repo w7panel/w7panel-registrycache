@@ -151,6 +151,7 @@ func (l Storage) DownloadBlob(ctx context.Context, pullChunkFunc func(repository
 			writeLen = int64(tlen)
 		} else {
 			writeLen, err = io.Copy(targetWriter, reader)
+			reader.Close()
 			if err != nil {
 				return err
 			}
