@@ -42,7 +42,7 @@ export default {
                         <el-tooltip content="0值为永不过期">
                             <span>
                                 <span class="cursor va-middle">缓存时间(分钟)</span>
-                                <el-icon class="ml-4 va-middle" color="#999"><WarningFilled /></el-icon>
+                                <el-icon class="ml-4 va-middle" color="#86909C"><WarningFilled /></el-icon>
                             </span>
                         </el-tooltip>
                     </td>
@@ -52,7 +52,7 @@ export default {
                         <el-tooltip content="权重值越小优先级越高">
                             <span>
                                 <span class="cursor va-middle">权重</span>
-                                <el-icon class="ml-4 va-middle" color="#999"><WarningFilled /></el-icon>
+                                <el-icon class="ml-4 va-middle" color="#86909C"><WarningFilled /></el-icon>
                             </span>
                         </el-tooltip>
                     </td>
@@ -164,7 +164,7 @@ export default {
                         <el-tooltip content="权重值越小优先级越高">
                             <span>
                                 <span class="cursor va-middle">权重</span>
-                                <el-icon class="ml-4 va-middle" color="#999"><WarningFilled /></el-icon>
+                                <el-icon class="ml-4 va-middle" color="#86909C"><WarningFilled /></el-icon>
                             </span>
                         </el-tooltip>
                     </td>
@@ -225,7 +225,7 @@ export default {
                                     password: i?.password || '',
                                 }
                             }}>设置</span>
-                            <span className="c-blue cursor ml-10" onClick={()=>{form.value.registry_sources.splice(index,1)}}>删除</span>
+                            <span className="c-blue cursor ml-16" onClick={()=>{form.value.registry_sources.splice(index,1)}}>删除</span>
                         </td>
                     </tr>)
                 }

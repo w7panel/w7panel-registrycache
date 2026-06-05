@@ -174,7 +174,7 @@ export default {
         });
 
         return () => (<div className="padding-20">
-            <div className="mb-10 df jc-s">
+            <div className="mb-20 df jc-s">
                 <el-button
                     type="primary"
                     icon={() => <el-icon><Plus /></el-icon>}
@@ -200,8 +200,8 @@ export default {
                     width="300px"
                     v-slots={{
                         default: (scope) => (<>
-                            <el-button type="text" onClick={() => { toEdit(scope.row); }}>修改</el-button>
-                            <el-button type="text" onClick={() => { toHttpsConfig(scope.row); }}>https配置</el-button>
+                            <span class="c-blue cursor" onClick={() => { toEdit(scope.row); }}>修改</span>
+                            <span class="c-blue cursor ml-16" onClick={() => { toHttpsConfig(scope.row); }}>https配置</span>
                             <el-popconfirm
                                 title="确定要删除吗？"
                                 icon={WarningFilled}
@@ -210,7 +210,7 @@ export default {
                                 onConfirm={() => { toDelete(scope.row); }}
                                 v-slots={{
                                     reference: () => (
-                                        <el-button type="text">删除</el-button>
+                                        <span class="c-blue cursor ml-16">删除</span>
                                     ),
                                     actions: ({ confirm, cancel }) => (
                                         <div class="delete-popconfirm__actions">
