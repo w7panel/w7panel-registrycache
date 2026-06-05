@@ -99,7 +99,7 @@ export default {
                     
                 <div class="com-back df ai-c">
                     <span class="backbtn df ai-c" onClick={() => router.go(-1)}>
-                        <el-icon class="backicon" color="#0052D9" size={20}><Back /></el-icon>
+                        <el-icon class="backicon" color="#165DFF" size={20}><Back /></el-icon>
                         <span style={{ color: '#86909c', fontSize: '16px' }}>站点配置</span>
                         <span style={{ color: '#c9cdd4', padding: '0 5px', fontWeight: 900, fontSize: '16px' }}>/</span>
                         <span style={{ fontSize: '16px' }}>详情</span>

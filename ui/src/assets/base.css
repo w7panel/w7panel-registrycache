@@ -1,5 +1,25 @@
 :root {
-  --el-color-primary: rgb(22, 93, 255)!important;
+  --el-color-primary: #165dff !important;
+  --el-color-primary-light-3: #4080ff !important;
+  --el-color-primary-light-5: #94bfff !important;
+  --el-color-primary-light-7: #bedaff !important;
+  --el-color-primary-light-8: #dceeff !important;
+  --el-color-primary-light-9: #e8f3ff !important;
+  --el-color-primary-dark-2: #0e42d2 !important;
+  --el-color-success: #00b42a !important;
+  --el-color-warning: #ff7d00 !important;
+  --el-color-danger: #f53f3f !important;
+  --el-color-info: #86909c !important;
+  --arc-color-text-1: #1d2129;
+  --arc-color-text-2: #4e5969;
+  --arc-color-text-3: #86909c;
+  --arc-color-text-4: #c9cdd4;
+  --arc-color-fill-1: #f2f3f5;
+  --arc-color-fill-2: #f7f8fa;
+  --arc-color-fill-3: #e5e6eb;
+  --arc-color-border-1: #f2f3f5;
+  --arc-color-border-2: #e5e6eb;
+  --arc-color-danger-soft: #fff2f0;
 }
 
 html,
@@ -14,6 +34,8 @@ body {
 }
 body{
     overflow: auto;
+    color: var(--arc-color-text-1);
+    background: #fff;
 }
 
 .df{display:flex; flex-flow:row;}
@@ -50,21 +72,21 @@ a.txt-line,
 .lh-16{line-height:1.6;}
 .lh-2{line-height:2;}
 
-.c-red{color:#F56C6C;}
-.c-yellow{color:#FFD7A1;}
-.c-green{color:#00A870;}
+.c-red{color:#f53f3f;}
+.c-yellow{color:#ffb400;}
+.c-green{color:#00b42a;}
 a.c-blue,
-.c-blue{color:rgb(22, 93, 255);}
-.c-brown{color:#C37937;}
+.c-blue{color:#165dff;}
+.c-brown{color:#9f5f00;}
 a,.c-orange,
-.c-orange{ color: orange;}
+.c-orange{ color: #ff7d00;}
 
-.c-33{color:#333;}
-.c-66{color:#656668;}
-.c-77{color:#7A7B7B;}
-.c-99{color:#979797;}
-.c-aa{color:#A4ABAF;}
-.c-cc{color:#ccc;}
+.c-33{color:var(--arc-color-text-1);}
+.c-66{color:var(--arc-color-text-2);}
+.c-77{color:var(--arc-color-text-2);}
+.c-99{color:var(--arc-color-text-3);}
+.c-aa{color:var(--arc-color-text-3);}
+.c-cc{color:var(--arc-color-text-4);}
 .c-ff{color:#fff;}
 
 .mt-2{margin-top:2px;}
@@ -156,38 +178,38 @@ a,.c-orange,
     box-sizing: border-box;
     min-height: 50px;
     line-height: 22px;
-    border: 1px solid rgb(242,243,245);
+    border: 1px solid var(--arc-color-border-1);
     border-left: 0;
     border-right: 0;
-    background: rgb(247,248,250);
-    color: rgb(29,33,41)
+    background: var(--arc-color-fill-2);
+    color: var(--arc-color-text-1)
 }
 
 .com-table tr:first-child td {
-    background: rgb(242,243,245);
+    background: var(--arc-color-fill-1);
     border-top: 0;
-    color: rgb(29,33,41)
+    color: var(--arc-color-text-1)
 }
 
 .com-table .el-input,
 .com-table .el-select,
 .com-table .el-input-tag {
-    --el-input-bg-color: rgb(242,243,245);
+    --el-input-bg-color: var(--arc-color-fill-1);
     --el-input-border-color: transparent;
     --el-input-hover-border-color: transparent;
     --el-input-focus-border-color: var(--el-color-primary);
-    --el-disabled-bg-color: rgb(242,243,245);
+    --el-disabled-bg-color: var(--arc-color-fill-1);
     --el-disabled-border-color: transparent;
     --el-border-color: transparent;
     --el-border-color-hover: transparent;
-    --el-fill-color-blank: rgb(242,243,245);
+    --el-fill-color-blank: var(--arc-color-fill-1);
 }
 
 .com-table .el-input__wrapper,
 .com-table .el-select__wrapper,
 .com-table .el-input-tag__wrapper,
 .com-table .el-input-group__prepend {
-    background-color: rgb(242,243,245)!important;
+    background-color: var(--arc-color-fill-1)!important;
     border: 0!important;
     outline: none!important;
     box-shadow: none!important;
@@ -202,7 +224,7 @@ a,.c-orange,
 .com-table .el-input.is-disabled .el-input__wrapper,
 .com-table .el-select.is-disabled .el-select__wrapper,
 .com-table .el-input-tag.is-disabled .el-input-tag__wrapper {
-    background-color: rgb(242,243,245)!important;
+    background-color: var(--arc-color-fill-1)!important;
     border: 0!important;
     outline: none!important;
     box-shadow: none!important;
@@ -222,7 +244,7 @@ a,.c-orange,
 }
 
 .com-table .el-select:not(.is-disabled) .el-select__wrapper:not(.is-focused) {
-    background-color: rgb(242,243,245)!important;
+    background-color: var(--arc-color-fill-1)!important;
     box-shadow: none!important;
 }
 
@@ -238,7 +260,7 @@ a,.c-orange,
 
 .next-input-select .el-select__wrapper{
     border-radius:var(--el-border-radius-base) 0 0 var(--el-border-radius-base);
-    background-color:rgb(242,243,245);
+    background-color:var(--arc-color-fill-1);
     height:100%;
     box-shadow: none!important;
 }
@@ -250,16 +272,17 @@ a,.c-orange,
 
 .delete-popconfirm.el-popper{
     padding:16px;
-    border:1px solid #f3d2d2;
+    border:1px solid #ffece8;
     border-radius:4px;
-    box-shadow:0 12px 30px rgba(245, 108, 108, 0.16);
+    background: var(--arc-color-danger-soft);
+    box-shadow:0 12px 30px rgba(245, 63, 63, 0.12);
 }
 
 .delete-popconfirm .el-popconfirm__main{
     display:flex;
     align-items:flex-start;
     gap:6px;
-    color:#303133;
+    color:var(--arc-color-text-1);
     font-size: 12px;
     line-height:1.6;
 }
@@ -295,21 +318,21 @@ a,.c-orange,
     font-weight: 500;
     font-size: 16px;
     line-height: 1.5;
-    color: rgb(29,33,41);
+    color: var(--arc-color-text-1);
 }
 .alert-style-ul{
-    color: rgb(78,89,105)!important;
+    color: var(--arc-color-text-2)!important;
     margin:0;
     line-height: 22px;
     padding-inline-start: 18px;
 }
 .alert-style-default{
-    color: rgb(78,89,105)!important;
+    color: var(--arc-color-text-2)!important;
 }
 
 .el-table.table-header table thead th {
-	background: #F3F3F3;
-	color: #666666;
+	background: var(--arc-color-fill-1);
+	color: var(--arc-color-text-2);
 	font-weight: 500;
 	padding: 11px 0;
 }
