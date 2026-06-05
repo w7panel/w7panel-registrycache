@@ -33,20 +33,23 @@ export default {
             <div>
                 {domainParse.value.exist && (
                     <el-alert
-                        title="添加域名后，请在您持有域名的DNS解析后台添加对应的域名解析记录："
                         type="primary"
                         show-icon
                         closable={false}
-                        class="mt-20"
-                    >
-                        <span>记录类型：</span>
-                        <span>{domainParse.value.type}，</span>
-                        <span>记录值：</span>
-                        <span>{domainParse.value.type === 'A' ? domainParse.value.ips : domainParse.value.cname}</span>
-                        {domainParse.value.type === 'A' && domainParse.value.ips.includes(',') && (
-                            <span>（IP任选一个，解析功能支持也可添加多条记录）</span>
-                        )}
-                    </el-alert>
+                        class="mt-20 alert-style"
+                        v-slots={{
+                            title: () => (<div>添加域名后，请在您持有域名的DNS解析后台添加对应的域名解析记录：</div>),
+                            default: () => (<div class="alert-style-default">
+                                <span>记录类型：</span>
+                                <span>{domainParse.value.type}，</span>
+                                <span>记录值：</span>
+                                <span>{domainParse.value.type === 'A' ? domainParse.value.ips : domainParse.value.cname}</span>
+                                {domainParse.value.type === 'A' && domainParse.value.ips.includes(',') && (
+                                    <span>（IP任选一个，解析功能支持也可添加多条记录）</span>
+                                )}
+                            </div>)
+                        }}
+                    ></el-alert>
                 )}
             </div>
         )

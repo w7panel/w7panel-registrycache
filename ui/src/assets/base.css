@@ -303,7 +303,9 @@ a,.c-orange,
     line-height: 22px;
     padding-inline-start: 18px;
 }
-
+.alert-style-default{
+    color: rgb(78,89,105)!important;
+}
 
 .el-table.table-header table thead th {
 	background: #F3F3F3;
