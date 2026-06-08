@@ -35,6 +35,7 @@ func init() {
 
 const TransferTypeBlob = int8(1)
 const TransferTypeManifest = int8(2)
+const TransferSourceCheckTimeout = 10 * time.Second
 
 type TransferInfo struct {
 	CacheSetting            RegistryCacheSetting
@@ -44,6 +45,12 @@ type TransferInfo struct {
 	Type                    int8
 	CurReTryNum             int8
 }
+
+type TransferSourceClient struct {
+	serverUrl string
+	client    client.Client
+}
+
 type SyncWriter struct {
 	buffer           [][]byte
 	startOffset      int64
@@ -230,7 +237,8 @@ func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest
 	targetRepoName = l.RebuildImageName(targetRepoName, transferInfo.CacheSetting.CacheRegistry.CacheNamespacePrefix)
 
 	slog.Info("transfer blobs", "repoName", repoName, "targetRepoName", targetRepoName, "tag", tag, "blobs", dedupedBlobs)
-	if err := l.copyBlobs(sourceRepo, targetRepo, repoName, targetRepoName, dedupedBlobs, transferInfo.CurReTryNum == 0); err != nil {
+	sourceRepos := l.transferSourceClients(sourceRepo, transferInfo)
+	if err := l.copyBlobs(sourceRepos, targetRepo, repoName, targetRepoName, dedupedBlobs, transferInfo); err != nil {
 		return fmt.Errorf("同步blobs失败: %v", err)
 	}
 
@@ -255,22 +263,22 @@ func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest
 	return err
 }
 
-func (l Transfer) copyBlobs(sourceRepo, targetRepo client.Client, sourceRepoName string, targetRepoName string, blobs []distribution.Descriptor, forceOverrideBlob bool) error {
+func (l Transfer) copyBlobs(sourceRepos []TransferSourceClient, targetRepo client.Client, sourceRepoName string, targetRepoName string, blobs []distribution.Descriptor, transferInfo TransferInfo) error {
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(blobs))
 	sem := make(chan struct{}, min(10, len(blobs))) // 限制blob并发数
 
-	for _, blob := range blobs {
+	for blobIndex, blob := range blobs {
 		wg.Add(1)
 		sem <- struct{}{}
 
-		go func(blob distribution.Descriptor) {
+		go func(blobIndex int, blob distribution.Descriptor) {
 			defer func() {
 				<-sem
 				wg.Done()
 			}()
 
-			if !forceOverrideBlob {
+			if transferInfo.CurReTryNum != 0 {
 				exists, _, _, _ := targetRepo.BlobExist(targetRepoName, blob.Digest.String())
 				if exists {
 					return
@@ -282,7 +290,9 @@ func (l Transfer) copyBlobs(sourceRepo, targetRepo client.Client, sourceRepoName
 				RepositoryName:   targetRepoName,
 				RepositoryDigest: blob.Digest.String(),
 			}
-			err := Storage{}.DownloadBlob(context.Background(), sourceRepo.PullBlobChunk, sourceRepoName, blob.Digest.String(), blob.Size, syncWriter, false)
+			sourceRepo := sourceRepos[(blobIndex+int(transferInfo.CurReTryNum))%len(sourceRepos)]
+			slog.Info("transfer blob source selected", "repoName", sourceRepoName, "targetRepoName", targetRepoName, "blob", blob.Digest.String(), "blobSize", blob.Size, "source", sourceRepo.serverUrl)
+			err := Storage{}.DownloadBlob(context.Background(), sourceRepo.client.PullBlobChunk, sourceRepoName, blob.Digest.String(), blob.Size, syncWriter, false)
 			if err == nil {
 				err = syncWriter.End()
 			}
@@ -290,7 +300,7 @@ func (l Transfer) copyBlobs(sourceRepo, targetRepo client.Client, sourceRepoName
 				slog.Error("transfer download blob error", "repoName", sourceRepoName, "blob", blob.Digest.String(), "err", err)
 				errChan <- err
 			}
-		}(blob)
+		}(blobIndex, blob)
 	}
 
 	wg.Wait()
@@ -304,6 +314,101 @@ func (l Transfer) copyBlobs(sourceRepo, targetRepo client.Client, sourceRepoName
 	}
 
 	return nil
+}
+
+func (l Transfer) transferSourceClients(sourceRepo client.Client, transferInfo TransferInfo) []TransferSourceClient {
+	sourceRepos := []TransferSourceClient{
+		{
+			serverUrl: transferInfo.SourceRegistryServerUrl,
+			client:    sourceRepo,
+		},
+	}
+	if len(transferInfo.CacheSetting.RegistrySources) <= 1 {
+		slog.Info("transfer source check skipped", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "source", transferInfo.SourceRegistryServerUrl, "reason", "single source")
+		return sourceRepos
+	}
+
+	seen := map[string]bool{
+		transferInfo.SourceRegistryServerUrl: true,
+	}
+	candidates := make([]RegistrySource, 0, len(transferInfo.CacheSetting.RegistrySources)-1)
+
+	for _, registry := range transferInfo.CacheSetting.RegistrySources {
+		if registry.ServerUrl == "" || seen[registry.ServerUrl] {
+			continue
+		}
+		seen[registry.ServerUrl] = true
+		candidates = append(candidates, registry)
+	}
+	if len(candidates) == 0 {
+		slog.Info("transfer source check skipped", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "source", transferInfo.SourceRegistryServerUrl, "reason", "no candidates")
+		return sourceRepos
+	}
+	slog.Info("transfer source check begin", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "source", transferInfo.SourceRegistryServerUrl, "candidate_count", len(candidates), "timeout", TransferSourceCheckTimeout)
+
+	ctx, cancel := context.WithTimeout(context.Background(), TransferSourceCheckTimeout)
+	defer cancel()
+
+	doneChan := make(chan struct{}, len(candidates))
+	available := make(map[string]client.Client)
+	var mu sync.Mutex
+	for _, registry := range candidates {
+		go func(registry RegistrySource) {
+			defer func() {
+				select {
+				case doneChan <- struct{}{}:
+				case <-ctx.Done():
+				}
+			}()
+
+			registryClient := RegistryClient{}.GetRegistryClient(transferInfo.CacheSetting.Host, registry.ServerUrl, nil)
+			if registryClient == nil {
+				slog.Warn("transfer source registry client is nil", "registry", registry.ServerUrl)
+				return
+			}
+			exists, _, err := registryClient.ManifestExist(transferInfo.RepositoryName, transferInfo.Reference)
+			if err != nil {
+				slog.Warn("transfer source manifest check failed", "registry", registry.ServerUrl, "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "err", err)
+				return
+			}
+			if !exists {
+				slog.Info("transfer source manifest not exists", "registry", registry.ServerUrl, "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference)
+				return
+			}
+			if ctx.Err() != nil {
+				return
+			}
+
+			slog.Info("transfer source manifest exists", "registry", registry.ServerUrl, "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference)
+			mu.Lock()
+			available[registry.ServerUrl] = registryClient
+			mu.Unlock()
+		}(registry)
+	}
+
+	for i := 0; i < len(candidates); i++ {
+		select {
+		case <-doneChan:
+		case <-ctx.Done():
+			slog.Info("transfer source manifest check timeout", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "timeout", TransferSourceCheckTimeout)
+			i = len(candidates)
+		}
+	}
+
+	mu.Lock()
+	for _, registry := range candidates {
+		registryClient, ok := available[registry.ServerUrl]
+		if ok {
+			sourceRepos = append(sourceRepos, TransferSourceClient{
+				serverUrl: registry.ServerUrl,
+				client:    registryClient,
+			})
+		}
+	}
+	mu.Unlock()
+	slog.Info("transfer source check complete", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "source_count", len(sourceRepos), "candidate_count", len(candidates))
+
+	return sourceRepos
 }
 
 func (l Transfer) Loop() {
