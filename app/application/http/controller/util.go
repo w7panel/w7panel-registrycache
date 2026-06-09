@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gitee.com/we7coreteam/w7-registry-cache/app/application/logic"
@@ -31,6 +32,60 @@ func etagMatch(r *http.Request, etag string) bool {
 		}
 	}
 	return false
+}
+
+func parseBlobRange(rangeHeader string, blobSize int64) (start, end int64, partial bool, err error) {
+	if rangeHeader == "" {
+		return 0, blobSize - 1, false, nil
+	}
+	if blobSize <= 0 {
+		return 0, 0, false, fmt.Errorf("invalid range for empty blob")
+	}
+
+	const prefix = "bytes="
+	if !strings.HasPrefix(rangeHeader, prefix) {
+		return 0, 0, false, fmt.Errorf("unsupported range unit")
+	}
+
+	spec := strings.TrimSpace(strings.TrimPrefix(rangeHeader, prefix))
+	if spec == "" || strings.Contains(spec, ",") {
+		return 0, 0, false, fmt.Errorf("unsupported range")
+	}
+
+	parts := strings.SplitN(spec, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false, fmt.Errorf("invalid range")
+	}
+
+	if parts[0] == "" {
+		suffixLen, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || suffixLen <= 0 {
+			return 0, 0, false, fmt.Errorf("invalid suffix range")
+		}
+		if suffixLen >= blobSize {
+			return 0, blobSize - 1, true, nil
+		}
+		return blobSize - suffixLen, blobSize - 1, true, nil
+	}
+
+	start, err = strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || start < 0 || start >= blobSize {
+		return 0, 0, false, fmt.Errorf("invalid range start")
+	}
+
+	if parts[1] == "" {
+		return start, blobSize - 1, true, nil
+	}
+
+	end, err = strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || end < start {
+		return 0, 0, false, fmt.Errorf("invalid range end")
+	}
+	if end >= blobSize {
+		end = blobSize - 1
+	}
+
+	return start, end, true, nil
 }
 
 func extractParams(re *regexp.Regexp, matches []string) *ParamsValidate {

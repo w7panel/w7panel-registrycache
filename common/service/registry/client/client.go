@@ -438,6 +438,11 @@ func (c *client) PullBlob(repository, digest string) (int64, io.ReadCloser, erro
 	return size, resp.Body, nil
 }
 
+type rangeReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
 // PullBlobChunk pulls the specified blob, but by chunked, refer to https://github.com/opencontainers/distribution-spec/blob/main/spec.md#pull for more details.
 func (c *client) PullBlobChunk(repository, digest string, _ int64, start, end int64) (int64, io.ReadCloser, error) {
 	req, err := http.NewRequest(http.MethodGet, buildBlobURL(c.url, repository, digest), nil)
@@ -452,7 +457,32 @@ func (c *client) PullBlobChunk(repository, digest string, _ int64, start, end in
 		return 0, nil, err
 	}
 
-	var size int64
+	expectedSize := end - start + 1
+	if expectedSize <= 0 {
+		resp.Body.Close()
+		return 0, nil, fmt.Errorf("invalid blob range: start=%d end=%d", start, end)
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		if start > 0 {
+			if _, err = io.CopyN(io.Discard, resp.Body, start); err != nil {
+				resp.Body.Close()
+				return 0, nil, err
+			}
+		}
+
+		return expectedSize, rangeReadCloser{
+			Reader: io.LimitReader(resp.Body, expectedSize),
+			Closer: resp.Body,
+		}, nil
+	}
+
+	if resp.StatusCode != http.StatusPartialContent {
+		resp.Body.Close()
+		return 0, nil, fmt.Errorf("unexpected blob chunk status: %d", resp.StatusCode)
+	}
+
+	size := expectedSize
 	n := resp.Header.Get("Content-Length")
 	// no content-length is acceptable, which can taken from manifests
 	if len(n) > 0 {

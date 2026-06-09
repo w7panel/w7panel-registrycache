@@ -202,6 +202,8 @@ func (c Repository) handlerManifest(ctx *gin.Context, setting logic.RegistryCach
 				modifyTime, _ := logic.Storage{}.GetRepositoryModifyTime(setting.Host, reqImageName, params.ImageReference)
 				if modifyTime.IsZero() || time.Since(modifyTime).Minutes() > float64(cacheTtl) {
 					existsCache = false
+					manifest = nil
+					downloadFunc = nil
 				}
 			}
 
@@ -389,18 +391,39 @@ func (c Repository) handlerBlob(ctx *gin.Context, setting logic.RegistryCacheSet
 		return
 	}
 
+	rangeStart, rangeEnd, partialContent, rangeErr := parseBlobRange(ctx.Request.Header.Get("Range"), blobSize)
+	if rangeErr != nil {
+		ctx.Header("Content-Range", fmt.Sprintf("bytes */%d", blobSize))
+		ctx.Header("Docker-Distribution-API-Version", "registry/2.0")
+		ctx.Status(http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+
+	statusCode := http.StatusOK
+	contentLength := blobSize
+	if partialContent {
+		statusCode = http.StatusPartialContent
+		contentLength = rangeEnd - rangeStart + 1
+		ctx.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rangeStart, rangeEnd, blobSize))
+	}
+
+	ctx.Header("Accept-Ranges", "bytes")
 	ctx.Header("Docker-Content-Digest", blobDigest)
 	ctx.Header("Content-Type", "application/octet-stream")
-	ctx.Header("Content-Length", fmt.Sprintf("%d", blobSize))
+	ctx.Header("Content-Length", fmt.Sprintf("%d", contentLength))
 	ctx.Header("Etag", blobDigest)
 	ctx.Header("Docker-Distribution-API-Version", "registry/2.0")
 
 	if ctx.Request.Method == http.MethodHead {
-		ctx.Status(http.StatusOK)
+		ctx.Status(statusCode)
 		return
 	}
 
-	err = logic.Storage{}.DownloadBlob(ctx, downloadFunc, pullImageName, params.ImageReference, blobSize, ctx.Writer, true)
+	ctx.Status(statusCode)
+	if contentLength == 0 {
+		return
+	}
+	err = logic.Storage{}.DownloadBlobRange(ctx, downloadFunc, pullImageName, params.ImageReference, blobSize, rangeStart, rangeEnd, ctx.Writer, true)
 	if err != nil {
 		slog.Error("handle blob complete", "params", params, "err", err)
 		if errors.Is(err, io.ErrUnexpectedEOF) {

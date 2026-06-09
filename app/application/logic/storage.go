@@ -79,18 +79,29 @@ func (l Storage) DownloadBlob(ctx context.Context, pullChunkFunc func(repository
 		return nil
 	}
 
-	startOffset := int64(0)
+	return l.DownloadBlobRange(ctx, pullChunkFunc, repositoryName, repositoryDigest, blobSize, 0, blobSize-1, targetWriter, useInHttp)
+}
+
+func (l Storage) DownloadBlobRange(ctx context.Context, pullChunkFunc func(repository, digest string, blobSize, start, end int64) (size int64, blob io.ReadCloser, err error), repositoryName string, repositoryDigest string, blobSize, start, end int64, targetWriter io.Writer, useInHttp bool) error {
+	if blobSize <= 0 {
+		return nil
+	}
+	if start < 0 || end < start || end >= blobSize {
+		return fmt.Errorf("invalid blob range: start=%d end=%d size=%d", start, end, blobSize)
+	}
+
+	startOffset := start
 	chunkSize := int64(DownloadChunkSize)
 
-	for startOffset < blobSize {
+	for startOffset <= end {
 		if helper.CtxDone(ctx) {
 			slog.Info("pull interrupted", "repositoryName", repositoryName, "repositoryDigest", repositoryDigest)
 			return errors.New("download interrupted")
 		}
 
 		endOffset := startOffset + chunkSize - 1
-		if endOffset >= blobSize {
-			endOffset = blobSize - 1
+		if endOffset > end {
+			endOffset = end
 		}
 
 		var reader io.ReadCloser
@@ -127,7 +138,7 @@ func (l Storage) DownloadBlob(ctx context.Context, pullChunkFunc func(repository
 
 		if size == 0 && err == nil {
 			// 如果 startOffset 还没到末尾，但大小为 0，说明可能已经结束了或者出错了
-			if startOffset < blobSize {
+			if startOffset <= end {
 				return errors.New("download stalled: received 0 bytes but more data expected")
 			}
 			break
@@ -166,6 +177,7 @@ func (l Storage) DownloadBlob(ctx context.Context, pullChunkFunc func(repository
 
 	return nil
 }
+
 func (l Storage) DownloadManifest(ctx context.Context, pullFunc func(repository, reference string, accepttedMediaTypes ...string) (manifest distribution.Manifest, digest string, err error), repositoryName, repositoryReference string) (distribution.Manifest, error) {
 	var err error
 	var manifest distribution.Manifest
