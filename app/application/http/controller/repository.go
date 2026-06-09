@@ -448,7 +448,6 @@ func (c Repository) handlerBlob(ctx *gin.Context, setting logic.RegistryCacheSet
 		c.JsonResponseWithServerError(ctx, err)
 		return
 	}
-	ctx.Status(http.StatusOK)
 }
 
 func (c Repository) rebuildImageName(imageName string, namespaceSuffix string) string {
