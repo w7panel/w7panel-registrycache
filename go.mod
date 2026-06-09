@@ -24,7 +24,6 @@ require (
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/panjf2000/ants/v2 v2.11.3
-	github.com/patrickmn/go-cache v2.1.0+incompatible
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0
 	k8s.io/client-go v0.34.1
 )
