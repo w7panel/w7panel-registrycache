@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gitee.com/we7coreteam/w7-registry-cache/app/application/logic"
+	registryclient "gitee.com/we7coreteam/w7-registry-cache/common/service/registry/client"
 	"github.com/docker/distribution"
 	"github.com/gin-gonic/gin"
 	"github.com/we7coreteam/w7-rangine-go/v2/src/http/controller"
@@ -212,24 +213,14 @@ func (c Repository) handlerManifest(ctx *gin.Context, setting logic.RegistryCach
 
 	if !existsCache {
 		//按照规则选择一个仓库地址
-		sourceRegistryServerUrl = logic.RegistryServer{}.GetRegistrySourceFromRule(ctx, setting.Host, pullImageName, params.ImageReference, repositoryCacheRule, func(registryServerUrl string) bool {
-			sourceRegistryClient := logic.RegistryClient{}.GetRegistryClient(setting.Host, registryServerUrl, nil)
-			if sourceRegistryClient == nil {
-				slog.Info("manifest: GetRegistryClient with registry source ", "params", params, "source", registryServerUrl, "err", errors.New("sourceRegistryClient init fail"))
-				return false
-			} else {
-				_, smanifest, err1 := sourceRegistryClient.ManifestExist(pullImageName, params.ImageReference)
-				slog.Info("manifest: StatObject with registry source", "url", registryServerUrl, "params", params, "exists", smanifest, "err", err1)
-				if smanifest != nil {
-					manifest = smanifest
-					downloadFunc = sourceRegistryClient.PullManifest
-					return true
-				}
-				return false
-			}
+		logic.RegistryServer{}.WalkManifestRegistrySourcesFromRule(ctx, setting.Host, pullImageName, params.ImageReference, repositoryCacheRule, func(registryServerUrl string, sourceRegistryClient registryclient.Client, smanifest *distribution.Descriptor) bool {
+			manifest = smanifest
+			downloadFunc = sourceRegistryClient.PullManifest
+			sourceRegistryServerUrl = registryServerUrl
+			return true
 		})
 		if sourceRegistryServerUrl == "" {
-			slog.Info("manifest: GetRegistrySourceFromRule with registry source", "params", params, "cacheRule", repositoryCacheRule, "err", errors.New("not found"))
+			slog.Info("manifest: WalkManifestRegistrySourcesFromRule with registry source", "params", params, "cacheRule", repositoryCacheRule, "err", errors.New("not found"))
 		}
 	}
 
@@ -283,9 +274,6 @@ func (c Repository) handlerManifest(ctx *gin.Context, setting logic.RegistryCach
 	}
 
 	manifestObj, err := logic.Storage{}.DownloadManifest(ctx, downloadFunc, pullImageName, params.ImageReference)
-	if !existsCache && sourceRegistryServerUrl != "" {
-		go logic.RegistryServer{}.RecordRepositoryReferenceRegistryWeight(setting.Host, reqImageName, params.ImageReference, sourceRegistryServerUrl, err == nil)
-	}
 	if err != nil {
 		slog.Error("handle download manifest complete", "params", params, "err", err)
 		if errors.Is(err, io.ErrUnexpectedEOF) {
@@ -370,26 +358,15 @@ func (c Repository) handlerBlob(ctx *gin.Context, setting logic.RegistryCacheSet
 	}
 
 	if !existsCache {
-		sourceRegistryServerUrl = logic.RegistryServer{}.GetRegistrySourceFromRule(ctx, setting.Host, pullImageName, params.ImageReference, repositoryCacheRule, func(registryServerUrl string) bool {
-			sourceRegistryClient := logic.RegistryClient{}.GetRegistryClient(setting.Host, registryServerUrl, nil)
-			if sourceRegistryClient == nil {
-				slog.Info("blob: GetRegistryClient with registry source", "params", params, "source", registryServerUrl, "err", errors.New("sourceRegistryClient init fail"))
-				return false
-			} else {
-				sexists, sblobSize, sblobDigest, err1 := sourceRegistryClient.BlobExist(pullImageName, params.ImageReference)
-				slog.Info("manifest: StatObject with registry source", "url", registryServerUrl, "params", params, "exists", sexists, "err", err1)
-
-				if sexists {
-					blobSize = sblobSize
-					blobDigest = sblobDigest
-					downloadFunc = sourceRegistryClient.PullBlobChunk
-					return true
-				}
-				return false
-			}
+		logic.RegistryServer{}.WalkBlobRegistrySourcesFromRule(ctx, setting.Host, pullImageName, params.ImageReference, repositoryCacheRule, func(registryServerUrl string, sourceRegistryClient registryclient.Client, sblobSize int64, sblobDigest string) bool {
+			blobSize = sblobSize
+			blobDigest = sblobDigest
+			downloadFunc = sourceRegistryClient.PullBlobChunk
+			sourceRegistryServerUrl = registryServerUrl
+			return true
 		})
 		if sourceRegistryServerUrl == "" {
-			slog.Info("blob: GetRegistrySourceFromRule with registry source", "params", params, "cacheRule", repositoryCacheRule, "err", errors.New("not found"))
+			slog.Info("blob: WalkBlobRegistrySourcesFromRule with registry source", "params", params, "cacheRule", repositoryCacheRule, "err", errors.New("not found"))
 		}
 	}
 
@@ -424,9 +401,6 @@ func (c Repository) handlerBlob(ctx *gin.Context, setting logic.RegistryCacheSet
 	}
 
 	err = logic.Storage{}.DownloadBlob(ctx, downloadFunc, pullImageName, params.ImageReference, blobSize, ctx.Writer, true)
-	if !existsCache && sourceRegistryServerUrl != "" {
-		go logic.RegistryServer{}.RecordRepositoryReferenceRegistryWeight(setting.Host, reqImageName, params.ImageReference, sourceRegistryServerUrl, err == nil)
-	}
 	if err != nil {
 		slog.Error("handle blob complete", "params", params, "err", err)
 		if errors.Is(err, io.ErrUnexpectedEOF) {

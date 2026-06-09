@@ -364,85 +364,33 @@ func (l Transfer) transferSourceClients(sourceRepo client.Client, transferInfo T
 		return sourceRepos
 	}
 
+	repositoryCacheRule, _ := CacheRule{}.MatchRepositoryCacheRule(transferInfo.RepositoryName, transferInfo.CacheSetting.RepositoryCacheRules)
 	seen := map[string]bool{
 		transferInfo.SourceRegistryServerUrl: true,
 	}
-	candidates := make([]RegistrySource, 0, len(transferInfo.CacheSetting.RegistrySources)-1)
-
-	for _, registry := range transferInfo.CacheSetting.RegistrySources {
-		if registry.ServerUrl == "" || seen[registry.ServerUrl] {
-			continue
-		}
-		seen[registry.ServerUrl] = true
-		candidates = append(candidates, registry)
-	}
-	if len(candidates) == 0 {
-		slog.Info("transfer source check skipped", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "source", transferInfo.SourceRegistryServerUrl, "reason", "no candidates")
-		return sourceRepos
-	}
-	slog.Info("transfer source check begin", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "source", transferInfo.SourceRegistryServerUrl, "candidate_count", len(candidates), "timeout", TransferSourceCheckTimeout)
+	sourceCount := len(sourceRepos)
+	slog.Info("transfer source check begin", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "source", transferInfo.SourceRegistryServerUrl, "timeout", TransferSourceCheckTimeout)
 
 	ctx, cancel := context.WithTimeout(context.Background(), TransferSourceCheckTimeout)
 	defer cancel()
 
-	doneChan := make(chan struct{}, len(candidates))
-	available := make(map[string]client.Client)
-	var mu sync.Mutex
-	for _, registry := range candidates {
-		go func(registry RegistrySource) {
-			defer func() {
-				select {
-				case doneChan <- struct{}{}:
-				case <-ctx.Done():
-				}
-			}()
-
-			registryClient := RegistryClient{}.GetRegistryClient(transferInfo.CacheSetting.Host, registry.ServerUrl, nil)
-			if registryClient == nil {
-				slog.Warn("transfer source registry client is nil", "registry", registry.ServerUrl)
-				return
-			}
-			exists, _, err := registryClient.ManifestExist(transferInfo.RepositoryName, transferInfo.Reference)
-			if err != nil {
-				slog.Warn("transfer source manifest check failed", "registry", registry.ServerUrl, "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "err", err)
-				return
-			}
-			if !exists {
-				slog.Info("transfer source manifest not exists", "registry", registry.ServerUrl, "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference)
-				return
-			}
-			if ctx.Err() != nil {
-				return
-			}
-
-			slog.Info("transfer source manifest exists", "registry", registry.ServerUrl, "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference)
-			mu.Lock()
-			available[registry.ServerUrl] = registryClient
-			mu.Unlock()
-		}(registry)
-	}
-
-	for i := 0; i < len(candidates); i++ {
-		select {
-		case <-doneChan:
-		case <-ctx.Done():
-			slog.Info("transfer source manifest check timeout", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "timeout", TransferSourceCheckTimeout)
-			i = len(candidates)
+	RegistryServer{}.WalkManifestRegistrySourcesFromRule(ctx, transferInfo.CacheSetting.Host, transferInfo.RepositoryName, transferInfo.Reference, repositoryCacheRule, func(registryServerUrl string, registryClient client.Client, _ *distribution.Descriptor) bool {
+		if registryServerUrl == "" || seen[registryServerUrl] {
+			return false
 		}
-	}
+		seen[registryServerUrl] = true
 
-	mu.Lock()
-	for _, registry := range candidates {
-		registryClient, ok := available[registry.ServerUrl]
-		if ok {
-			sourceRepos = append(sourceRepos, TransferSourceClient{
-				serverUrl: registry.ServerUrl,
-				client:    registryClient,
-			})
-		}
+		slog.Info("transfer source manifest exists", "registry", registryServerUrl, "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference)
+		sourceRepos = append(sourceRepos, TransferSourceClient{
+			serverUrl: registryServerUrl,
+			client:    registryClient,
+		})
+		return false
+	})
+	if ctx.Err() != nil {
+		slog.Info("transfer source manifest check timeout", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "timeout", TransferSourceCheckTimeout)
 	}
-	mu.Unlock()
-	slog.Info("transfer source check complete", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "source_count", len(sourceRepos), "candidate_count", len(candidates))
+	slog.Info("transfer source check complete", "repoName", transferInfo.RepositoryName, "reference", transferInfo.Reference, "source_count", len(sourceRepos), "available_count", len(sourceRepos)-sourceCount)
 
 	return sourceRepos
 }
