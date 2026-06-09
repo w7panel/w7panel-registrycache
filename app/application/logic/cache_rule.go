@@ -7,12 +7,13 @@ import (
 )
 
 type RepositoryCacheRule struct {
-	CacheType      string   `json:"cache_type"`
-	RepositoryName []string `json:"repository_name"`
-	CacheTtl       int64    `json:"cache_ttl"`
-	Enable         bool     `json:"enable"`
-	Weight         int      `json:"weight"`
-	AssignRegistry string   `json:"assign_registry"`
+	CacheType        string   `json:"cache_type"`
+	RepositoryName   []string `json:"repository_name"`
+	CacheTtl         int64    `json:"cache_ttl"`
+	Enable           bool     `json:"enable"`
+	Weight           int      `json:"weight"`
+	AssignRegistry   string   `json:"assign_registry"`
+	DistributedCache bool     `json:"distributed_cache"`
 }
 
 type CacheRule struct {
