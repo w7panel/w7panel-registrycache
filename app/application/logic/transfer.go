@@ -51,6 +51,11 @@ type TransferSourceClient struct {
 	client    client.Client
 }
 
+type childManifestRef struct {
+	digest   string
+	manifest distribution.Manifest
+}
+
 type SyncWriter struct {
 	buffer           [][]byte
 	startOffset      int64
@@ -213,42 +218,27 @@ func (l Transfer) transferImage(transferInfo TransferInfo) error {
 func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest distribution.Manifest, transferInfo TransferInfo) error {
 	repoName := transferInfo.RepositoryName
 	tag := transferInfo.Reference
-	childManifest := make(map[string]distribution.Manifest)
-	blobs := make([]distribution.Descriptor, 0)
-	_, ok := sourceManifest.(*manifestlist.DeserializedManifestList)
-	if ok {
-		for _, item := range sourceManifest.(*manifestlist.DeserializedManifestList).Manifests {
-			cmanifest, err := Storage{}.DownloadManifest(context.Background(), sourceRepo.PullManifest, repoName, item.Digest.String())
-			if err != nil {
-				slog.Error("transfer pull platform manifest error", "repoName", repoName, "tag", tag, "err", err)
-				return err
-			}
-
-			childManifest[item.Digest.String()] = cmanifest
-			blobs = append(blobs, l.copyableBlobDescriptors(cmanifest.References())...)
-		}
-	} else {
-		blobs = append(blobs, l.copyableBlobDescriptors(sourceManifest.References())...)
+	childManifests, blobs, err := l.collectManifestReferences(sourceRepo, repoName, tag, sourceManifest)
+	if err != nil {
+		return err
 	}
 
-	// 同步所有blobs
-	dedupedBlobs := l.deduplicateBlobs(blobs)
 	targetRepoName := repoName
 	targetRepoName = l.RebuildImageName(targetRepoName, transferInfo.CacheSetting.CacheRegistry.CacheNamespacePrefix)
 
-	slog.Info("transfer blobs", "repoName", repoName, "targetRepoName", targetRepoName, "tag", tag, "blobs", dedupedBlobs)
+	slog.Info("transfer blobs", "repoName", repoName, "targetRepoName", targetRepoName, "tag", tag, "blobs", blobs)
 	sourceRepos := l.transferSourceClients(sourceRepo, transferInfo)
-	if err := l.copyBlobs(sourceRepos, targetRepo, repoName, targetRepoName, dedupedBlobs, transferInfo); err != nil {
+	if err := l.copyBlobs(sourceRepos, targetRepo, repoName, targetRepoName, blobs, transferInfo); err != nil {
 		return fmt.Errorf("同步blobs失败: %v", err)
 	}
 
-	for digest, item := range childManifest {
-		mediaType, payload, err := item.Payload()
+	for _, item := range childManifests {
+		mediaType, payload, err := item.manifest.Payload()
 		if err != nil {
 			return err
 		}
-		_, err = targetRepo.PushManifest(targetRepoName, digest, mediaType, payload)
-		slog.Info("transfer push platform manifest", "repoName", targetRepoName, "tag", tag, "digest", digest, "err", err)
+		_, err = targetRepo.PushManifest(targetRepoName, item.digest, mediaType, payload)
+		slog.Info("transfer push platform manifest", "repoName", targetRepoName, "tag", tag, "digest", item.digest, "err", err)
 		if err != nil {
 			return err
 		}
@@ -261,6 +251,59 @@ func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest
 	_, err = targetRepo.PushManifest(targetRepoName, tag, mediaType, payload)
 	slog.Info("transfer push platform manifest", "repoName", targetRepoName, "tag", tag, "err", err)
 	return err
+}
+
+func (l Transfer) collectManifestReferences(sourceRepo client.Client, repoName, tag string, manifest distribution.Manifest) ([]childManifestRef, []distribution.Descriptor, error) {
+	seenManifest := make(map[string]bool)
+	seenBlob := make(map[string]bool)
+
+	var collect func(distribution.Manifest) ([]childManifestRef, []distribution.Descriptor, error)
+	collect = func(manifest distribution.Manifest) ([]childManifestRef, []distribution.Descriptor, error) {
+		childManifests := make([]childManifestRef, 0)
+		blobs := make([]distribution.Descriptor, 0)
+
+		for _, item := range manifest.References() {
+			if !l.isManifestDescriptor(item.MediaType) {
+				if !l.isForeignLayer(item.MediaType) {
+					digest := item.Digest.String()
+					if !seenBlob[digest] {
+						seenBlob[digest] = true
+						blobs = append(blobs, item)
+					}
+				} else {
+					slog.Warn("skip foreign layer", "digest", item.Digest.String(), "mediaType", item.MediaType)
+				}
+				continue
+			}
+
+			digest := item.Digest.String()
+			if seenManifest[digest] {
+				continue
+			}
+			seenManifest[digest] = true
+
+			cmanifest, err := Storage{}.DownloadManifest(context.Background(), sourceRepo.PullManifest, repoName, digest)
+			if err != nil {
+				slog.Error("transfer pull child manifest error", "repoName", repoName, "tag", tag, "digest", digest, "mediaType", item.MediaType, "err", err)
+				return nil, nil, err
+			}
+
+			nestedChildManifests, nestedBlobs, err := collect(cmanifest)
+			if err != nil {
+				return nil, nil, err
+			}
+			childManifests = append(childManifests, nestedChildManifests...)
+			childManifests = append(childManifests, childManifestRef{
+				digest:   digest,
+				manifest: cmanifest,
+			})
+			blobs = append(blobs, nestedBlobs...)
+		}
+
+		return childManifests, blobs, nil
+	}
+
+	return collect(manifest)
 }
 
 func (l Transfer) copyBlobs(sourceRepos []TransferSourceClient, targetRepo client.Client, sourceRepoName string, targetRepoName string, blobs []distribution.Descriptor, transferInfo TransferInfo) error {

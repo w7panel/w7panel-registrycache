@@ -36,15 +36,15 @@ func (c Repository) Handler(ctx *gin.Context) {
 		return
 	}
 
-	slog.Info("req path", "fullpath", ctx.Request.RequestURI)
+	slog.Info("req path", "fullpath", ctx.Request.URL.Path)
 
 	var params *ParamsValidate
 	resourcesType := int8(0)
 	if ctx.Request.Method == http.MethodGet || ctx.Request.Method == http.MethodHead {
-		if matches := manifestRegex.FindStringSubmatch(ctx.Request.RequestURI); matches != nil {
+		if matches := manifestRegex.FindStringSubmatch(ctx.Request.URL.Path); matches != nil {
 			params = extractParams(manifestRegex, matches)
 			resourcesType = logic.TransferTypeManifest
-		} else if matches = blobRegex.FindStringSubmatch(ctx.Request.RequestURI); matches != nil {
+		} else if matches = blobRegex.FindStringSubmatch(ctx.Request.URL.Path); matches != nil {
 			params = extractParams(blobRegex, matches)
 			resourcesType = logic.TransferTypeBlob
 		}
