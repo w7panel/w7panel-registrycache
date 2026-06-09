@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -321,11 +322,9 @@ func (l Transfer) copyBlobs(sourceRepos []TransferSourceClient, targetRepo clien
 				wg.Done()
 			}()
 
-			if transferInfo.CurReTryNum != 0 {
-				exists, _, _, _ := targetRepo.BlobExist(targetRepoName, blob.Digest.String())
-				if exists {
-					return
-				}
+			if l.targetBlobReadable(targetRepo, targetRepoName, blob) {
+				slog.Info("transfer blob skipped with readable cache", "repoName", sourceRepoName, "targetRepoName", targetRepoName, "blob", blob.Digest.String(), "blobSize", blob.Size)
+				return
 			}
 
 			err := l.copyBlobWithFallback(sourceRepos, targetRepo, sourceRepoName, targetRepoName, blob, blobIndex, transferInfo)
@@ -347,6 +346,63 @@ func (l Transfer) copyBlobs(sourceRepos []TransferSourceClient, targetRepo clien
 	}
 
 	return nil
+}
+
+func (l Transfer) targetBlobReadable(targetRepo client.Client, targetRepoName string, blob distribution.Descriptor) bool {
+	exists, size, digest, err := targetRepo.BlobExist(targetRepoName, blob.Digest.String())
+	if err != nil {
+		slog.Warn("transfer target blob exists check failed", "repoName", targetRepoName, "blob", blob.Digest.String(), "err", err)
+		return false
+	}
+	if !exists {
+		return false
+	}
+	if digest != "" && digest != blob.Digest.String() {
+		slog.Warn("transfer target blob digest mismatch", "repoName", targetRepoName, "blob", blob.Digest.String(), "targetDigest", digest)
+		return false
+	}
+	if blob.Size > 0 && size != blob.Size {
+		slog.Warn("transfer target blob size mismatch", "repoName", targetRepoName, "blob", blob.Digest.String(), "blobSize", blob.Size, "targetSize", size)
+		return false
+	}
+	if blob.Size <= 0 {
+		slog.Warn("transfer target blob size unknown, skip readable cache shortcut", "repoName", targetRepoName, "blob", blob.Digest.String(), "blobSize", blob.Size, "targetSize", size)
+		return false
+	}
+
+	if l.targetBlobRangeReadable(targetRepo, targetRepoName, blob, 0, 0) {
+		if blob.Size == 1 || l.targetBlobRangeReadable(targetRepo, targetRepoName, blob, blob.Size-1, blob.Size-1) {
+			return true
+		}
+	}
+
+	slog.Warn("transfer target blob range check failed", "repoName", targetRepoName, "blob", blob.Digest.String(), "blobSize", blob.Size)
+	return false
+}
+
+func (l Transfer) targetBlobRangeReadable(targetRepo client.Client, targetRepoName string, blob distribution.Descriptor, start, end int64) bool {
+	size, reader, err := targetRepo.PullBlobChunk(targetRepoName, blob.Digest.String(), blob.Size, start, end)
+	if err != nil {
+		slog.Warn("transfer target blob range pull failed", "repoName", targetRepoName, "blob", blob.Digest.String(), "start", start, "end", end, "err", err)
+		return false
+	}
+	if reader == nil {
+		return false
+	}
+	defer reader.Close()
+
+	readLen, err := io.Copy(io.Discard, reader)
+	if err != nil {
+		slog.Warn("transfer target blob range read failed", "repoName", targetRepoName, "blob", blob.Digest.String(), "start", start, "end", end, "err", err)
+		return false
+	}
+	expectedSize := end - start + 1
+	if size != expectedSize || readLen != expectedSize {
+		slog.Warn("transfer target blob range size mismatch", "repoName", targetRepoName, "blob", blob.Digest.String(), "start", start, "end", end, "size", size, "readLen", readLen, "expectedSize", expectedSize)
+		return false
+	}
+
+	return true
 }
 
 func (l Transfer) copyBlobWithFallback(sourceRepos []TransferSourceClient, targetRepo client.Client, sourceRepoName string, targetRepoName string, blob distribution.Descriptor, blobIndex int, transferInfo TransferInfo) error {
