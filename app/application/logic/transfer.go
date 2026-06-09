@@ -285,17 +285,7 @@ func (l Transfer) copyBlobs(sourceRepos []TransferSourceClient, targetRepo clien
 				}
 			}
 
-			syncWriter := &SyncWriter{
-				RegistryClient:   targetRepo,
-				RepositoryName:   targetRepoName,
-				RepositoryDigest: blob.Digest.String(),
-			}
-			sourceRepo := sourceRepos[(blobIndex+int(transferInfo.CurReTryNum))%len(sourceRepos)]
-			slog.Info("transfer blob source selected", "repoName", sourceRepoName, "targetRepoName", targetRepoName, "blob", blob.Digest.String(), "blobSize", blob.Size, "source", sourceRepo.serverUrl)
-			err := Storage{}.DownloadBlob(context.Background(), sourceRepo.client.PullBlobChunk, sourceRepoName, blob.Digest.String(), blob.Size, syncWriter, false)
-			if err == nil {
-				err = syncWriter.End()
-			}
+			err := l.copyBlobWithFallback(sourceRepos, targetRepo, sourceRepoName, targetRepoName, blob, blobIndex, transferInfo)
 			if err != nil {
 				slog.Error("transfer download blob error", "repoName", sourceRepoName, "blob", blob.Digest.String(), "err", err)
 				errChan <- err
@@ -314,6 +304,52 @@ func (l Transfer) copyBlobs(sourceRepos []TransferSourceClient, targetRepo clien
 	}
 
 	return nil
+}
+
+func (l Transfer) copyBlobWithFallback(sourceRepos []TransferSourceClient, targetRepo client.Client, sourceRepoName string, targetRepoName string, blob distribution.Descriptor, blobIndex int, transferInfo TransferInfo) error {
+	if len(sourceRepos) == 0 {
+		return errors.New("source registry clients are empty")
+	}
+
+	var errs []error
+	for attempt := 0; attempt < len(sourceRepos); attempt++ {
+		sourceRepo := sourceRepos[(blobIndex+int(transferInfo.CurReTryNum)+attempt)%len(sourceRepos)]
+		syncWriter := &SyncWriter{
+			RegistryClient:   targetRepo,
+			RepositoryName:   targetRepoName,
+			RepositoryDigest: blob.Digest.String(),
+		}
+
+		slog.Info("transfer blob source selected",
+			"repoName", sourceRepoName,
+			"targetRepoName", targetRepoName,
+			"blob", blob.Digest.String(),
+			"blobSize", blob.Size,
+			"source", sourceRepo.serverUrl,
+			"attempt", attempt+1,
+			"source_count", len(sourceRepos),
+		)
+
+		err := Storage{}.DownloadBlob(context.Background(), sourceRepo.client.PullBlobChunk, sourceRepoName, blob.Digest.String(), blob.Size, syncWriter, false)
+		if err == nil {
+			err = syncWriter.End()
+		}
+		if err == nil {
+			return nil
+		}
+
+		slog.Warn("transfer blob source failed",
+			"repoName", sourceRepoName,
+			"targetRepoName", targetRepoName,
+			"blob", blob.Digest.String(),
+			"source", sourceRepo.serverUrl,
+			"attempt", attempt+1,
+			"err", err,
+		)
+		errs = append(errs, fmt.Errorf("%s: %w", sourceRepo.serverUrl, err))
+	}
+
+	return fmt.Errorf("all source registry blob downloads failed: %w", errors.Join(errs...))
 }
 
 func (l Transfer) transferSourceClients(sourceRepo client.Client, transferInfo TransferInfo) []TransferSourceClient {
