@@ -21,16 +21,23 @@ export default {
             axios.post('/api/setting/list').then(res => {
                 let data = res?.data?.data || {};
 
-                tableData.value = Object.entries(data).map(arr => {
-                    arr[1].host = arr[0];
-                    arr[1].ingress_name = arr[1]?.extra?.ingress_name || '';
-                    return arr[1];
-                });
+                tableData.value = Object.entries(data)
+                    .filter(([group]) => group !== 'global')
+                    .map(arr => {
+                        arr[1].host = arr[0];
+                        arr[1].ingress_name = arr[1]?.extra?.ingress_name || '';
+                        return arr[1];
+                    });
             });
         };
 
         const toEdit = (row) => {
             router.push(`/setting?group=${row.group}&ingress_name=${row.ingress_name}&fromList=true`);
+        };
+
+        const openPublicHome = () => {
+            const route = router.resolve({ name: 'public-home' });
+            window.open(route.href, '_blank', 'noopener');
         };
 
         const toDelete = (row) => {
@@ -154,6 +161,10 @@ export default {
                     registry_sources: [],
                     extra: {
                         ingress_name: ingressName,
+                        cache_repository: {
+                            mode: 'global',
+                            storage_path: '/',
+                        },
                     },
                 });
 
@@ -174,7 +185,7 @@ export default {
         });
 
         return () => (<div className="padding-20">
-            <div className="mb-20 df jc-s">
+            <div className="mb-20 df jc-b ai-c df-ww" style="gap:12px;">
                 <el-button
                     type="primary"
                     icon={() => <el-icon><Plus /></el-icon>}
@@ -185,6 +196,11 @@ export default {
                         };
                     }}
                 >添加站点</el-button>
+                <div className="df ai-c df-ww" style="gap:10px;">
+                    <el-button style="margin-left:0;" onClick={() => router.push('/cache/repository')}>缓存仓库配置</el-button>
+                    <el-button style="margin-left:0;" onClick={() => router.push('/cache/page-setting')}>页面设置</el-button>
+                    <el-button style="margin-left:0;" onClick={openPublicHome}>访问公开首页</el-button>
+                </div>
             </div>
             <el-table
                 data={tableData.value}
