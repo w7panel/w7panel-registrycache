@@ -20,6 +20,8 @@ import (
 
 var settingFileSuffix = "-setting.json"
 
+const globalSettingGroup = "global"
+
 type CacheStorageRegistry struct {
 	ServerUrl            string `json:"server_url"`
 	Username             string `json:"username"`
@@ -59,8 +61,14 @@ func (l Setting) SetStorageCacheSetting(host string, cacheSetting RegistryCacheS
 			return cacheSetting.RepositoryCacheRules[i].Weight < cacheSetting.RepositoryCacheRules[j].Weight
 		})
 	}
-	if err := l.NormalizeCacheRegistry(&cacheSetting.CacheRegistry); err != nil {
-		return err
+	if host != globalSettingGroup && cacheRepositoryMode(cacheSetting.Extra) == "global" {
+		// 全局模式只持久化继承标记，仓库地址和凭据在读取时动态解析，
+		// 这样更新全局仓库后所有站点可以立即生效。
+		cacheSetting.CacheRegistry = CacheStorageRegistry{}
+	} else {
+		if err := l.NormalizeCacheRegistry(&cacheSetting.CacheRegistry); err != nil {
+			return err
+		}
 	}
 
 	settingContent, err := json.Marshal(cacheSetting)
@@ -142,7 +150,49 @@ func (l Setting) GetStorageCacheSetting(host string) *RegistryCacheSetting {
 		cacheSetting = val.(*RegistryCacheSetting)
 	}
 
-	return cacheSetting
+	if host == globalSettingGroup || cacheRepositoryMode(cacheSetting.Extra) != "global" {
+		return cacheSetting
+	}
+
+	globalSetting := l.GetStorageCacheSetting(globalSettingGroup)
+	if globalSetting == nil || globalSetting.CacheRegistry.ServerUrl == "" {
+		return cacheSetting
+	}
+
+	resolved := *cacheSetting
+	resolved.CacheRegistry = globalSetting.CacheRegistry
+	sitePath := strings.Trim(cacheRepositoryStoragePath(cacheSetting.Extra), "/")
+	if sitePath != "" {
+		globalPath := strings.Trim(resolved.CacheRegistry.CacheNamespacePrefix, "/")
+		resolved.CacheRegistry.CacheNamespacePrefix = strings.Trim(globalPath+"/"+sitePath, "/")
+	}
+	if resolved.CacheRegistry.ServerUrl != "" {
+		RegistryClient{}.SetRegistryClientCredential(resolved.Host, resolved.CacheRegistry.ServerUrl, types.Registry{
+			Credential: &types.Credential{
+				AccessKey:    resolved.CacheRegistry.Username,
+				AccessSecret: resolved.CacheRegistry.Password,
+			},
+		})
+	}
+	return &resolved
+}
+
+func cacheRepositoryMode(extra map[string]interface{}) string {
+	repository, ok := extra["cache_repository"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	mode, _ := repository["mode"].(string)
+	return mode
+}
+
+func cacheRepositoryStoragePath(extra map[string]interface{}) string {
+	repository, ok := extra["cache_repository"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	storagePath, _ := repository["storage_path"].(string)
+	return storagePath
 }
 
 func (l Setting) DelStorageCacheSetting(host string) {

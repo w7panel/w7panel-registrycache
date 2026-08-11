@@ -1,11 +1,23 @@
 import { ref,onMounted } from 'vue';
 import ImageCache from './setting-components/ImageCache';
-import ImageRepository from './setting-components/ImageRepository';
+import CacheRepositoryForm from '@/components/cache-repository-form.vue';
 import axios from 'axios';
-import { k8sproxy } from '@/utils/api';
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox,ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Back } from '@element-plus/icons-vue';
+import {
+    cacheRegistryToRepository,
+    getGlobalCacheRepository,
+    repositoryToCacheRegistry,
+    responseData,
+} from '@/api/config';
+
+const createRepository = () => ({
+    repository_url: '',
+    storage_path: '/',
+    username: '',
+    password: '',
+});
 
 export default {
     setup(){
@@ -15,12 +27,19 @@ export default {
             cache_registry: {},
             cache_rules: [],
             registry_sources: [],
+            extra: {},
         });
 
         // const open = ref(false);
         const tabsActive = ref('1');
         const refCache = ref(null);
-        const refRepository = ref(null);
+        const extra = ref({});
+        const globalRepositoryLoading = ref(true);
+        const globalRepository = ref(createRepository());
+        const cacheRepository = ref({
+            ...createRepository(),
+            mode: 'global',
+        });
 
         const group = route.query.group?.replace(/\/$/,'');
         const ingress_name = route.query.ingress_name;
@@ -29,6 +48,25 @@ export default {
         // const ingressData = ref({});
         // const imageCacheApp = ref({});
 
+        const loadGlobalRepository = async () => {
+            globalRepositoryLoading.value = true;
+            try {
+                globalRepository.value = {
+                    ...createRepository(),
+                    ...responseData(await getGlobalCacheRepository(true)),
+                };
+            } catch (e) {
+                globalRepository.value = createRepository();
+            } finally {
+                globalRepositoryLoading.value = false;
+            }
+        };
+
+        const normalizeRepositoryPath = () => {
+            const value = cacheRepository.value.storage_path?.trim() || '/';
+            cacheRepository.value.storage_path = value.startsWith('/') ? value : `/${value}`;
+        };
+
         const getData = ()=>{
             if(!group){return}
             axios.post('/api/setting/get',{
@@ -36,6 +74,18 @@ export default {
             }).then(res=>{
                 let data = res?.data?.data || {};
                 appData.value = data;
+                extra.value = data.extra || {};
+                const repository = cacheRegistryToRepository(data.cache_registry);
+                const storedRepository = extra.value.cache_repository || {};
+                cacheRepository.value = {
+                    ...createRepository(),
+                    ...repository,
+                    mode: ['global', 'custom'].includes(storedRepository.mode)
+                        ? storedRepository.mode
+                        : (repository.repository_url ? 'custom' : 'global'),
+                    storage_path: storedRepository.storage_path || repository.storage_path || '/',
+                };
+                normalizeRepositoryPath();
             })
             
             // let paneltoken = window.$wujie?.props?.paneltoken;
@@ -50,22 +100,62 @@ export default {
             // }
         }
 
+        const activeCacheRepository = () => {
+            const repository = cacheRepository.value.mode === 'global'
+                ? globalRepository.value
+                : cacheRepository.value;
+            return {
+                repository_url: repository.repository_url || '',
+                storage_path: cacheRepository.value.storage_path || '/',
+                username: repository.username || '',
+                password: repository.password || '',
+            };
+        };
+
+        const updateCacheRepository = (value) => {
+            cacheRepository.value = {
+                ...cacheRepository.value,
+                repository_url: cacheRepository.value.mode === 'custom'
+                    ? value.repository_url
+                    : cacheRepository.value.repository_url,
+                storage_path: value.storage_path,
+                username: cacheRepository.value.mode === 'custom'
+                    ? value.username
+                    : cacheRepository.value.username,
+                password: cacheRepository.value.mode === 'custom'
+                    ? value.password
+                    : cacheRepository.value.password,
+            };
+        };
+
         const submit = ()=>{
+            normalizeRepositoryPath();
+            if (cacheRepository.value.mode === 'global' && !globalRepository.value.repository_url) {
+                ElMessage.warning('请先配置全局缓存仓库');
+                return;
+            }
+            if (cacheRepository.value.mode === 'custom' && !cacheRepository.value.repository_url) {
+                ElMessage.warning('请输入镜像仓库地址');
+                return;
+            }
+
             let o = {
                 group: group,
-                cache_storage_registry: {
-                    ...refRepository.value.form,
-                    server_url: refRepository.value.form?.server_url_pre + refRepository.value.form?.server_url_after,
-                },
-                repository_cache_rules: refCache.value.form.cache_rules,
-                registry_sources: refCache.value.form.registry_sources?.map(i=>{
+                cache_storage_registry: repositoryToCacheRegistry(activeCacheRepository()),
+                repository_cache_rules: refCache.value.form.cache_rules || [],
+                registry_sources: (refCache.value.form.registry_sources || []).map(i=>{
                     return {
                         ...i,
                         server_url: i.server_url_pre + i.server_url_after,
                     }
                 }),
                 extra: {
+                    ...extra.value,
                     ingress_name: ingress_name,
+                    cache_repository: {
+                        mode: cacheRepository.value.mode,
+                        storage_path: cacheRepository.value.storage_path,
+                    },
                 },
             }
             o.registry_sources.map(i=>{
@@ -90,6 +180,7 @@ export default {
 
 
         onMounted(()=>{
+            loadGlobalRepository();
             getData();
         })
 
@@ -132,10 +223,37 @@ export default {
                         }}
                     />
 
-                    <ImageRepository
-                        ref={refRepository}
-                        data={appData.value}
-                    ></ImageRepository>
+                    <div class="mt-20 mb-20 df ai-c jc-b df-ww" style="gap:12px;">
+                        <el-radio-group
+                            modelValue={cacheRepository.value.mode}
+                            onUpdate:modelValue={value => { cacheRepository.value.mode = value; }}
+                        >
+                            <el-radio-button value="global" label="global">全局配置</el-radio-button>
+                            <el-radio-button value="custom" label="custom">自定义</el-radio-button>
+                        </el-radio-group>
+                        <el-button onClick={() => router.push('/cache/repository')}>编辑全局配置</el-button>
+                    </div>
+
+                    {!globalRepositoryLoading.value
+                        && cacheRepository.value.mode === 'global'
+                        && !globalRepository.value.repository_url
+                        ? <el-alert
+                            title="尚未配置全局缓存仓库，请先完成全局配置"
+                            type="warning"
+                            show-icon
+                            closable={false}
+                            class="mb-20"
+                        />
+                        : null}
+
+                    {globalRepositoryLoading.value
+                        ? <el-skeleton rows={2} animated />
+                        : <CacheRepositoryForm
+                            modelValue={activeCacheRepository()}
+                            repositoryDisabled={cacheRepository.value.mode === 'global'}
+                            inherited={cacheRepository.value.mode === 'global'}
+                            onUpdate:modelValue={updateCacheRepository}
+                        />}
                 </el-tab-pane>
             </el-tabs>
 

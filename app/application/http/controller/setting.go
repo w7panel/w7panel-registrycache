@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"encoding/json"
+	"net/url"
 	"strings"
 
 	"gitee.com/we7coreteam/w7-registry-cache/app/application/logic"
@@ -12,11 +14,33 @@ type Setting struct {
 	controller.Abstract
 }
 
-func (c Setting) List(ctx *gin.Context) {
+type commonRegistrySource struct {
+	ServerURL string `json:"server_url"`
+}
+
+type commonPageSetting struct {
+	Markdown      string `json:"markdown"`
+	ICPNumber     string `json:"icp_number"`
+	ICPLink       string `json:"icp_link"`
+	PoliceNumber  string `json:"police_number"`
+	PoliceLink    string `json:"police_link"`
+	Copyright     string `json:"copyright"`
+	CopyrightLink string `json:"copyright_link"`
+}
+
+type commonExtra struct {
+	PageSetting *commonPageSetting `json:"page_setting,omitempty"`
+}
+
+type commonRegistryCacheSetting struct {
+	RegistrySources []commonRegistrySource `json:"registry_sources,omitempty"`
+	Extra           *commonExtra           `json:"extra,omitempty"`
+}
+
+func mergeRegistryCacheList() (map[string]*logic.RegistryCacheSetting, error) {
 	list, err := logic.Setting{}.StorageCacheList()
 	if err != nil {
-		c.JsonResponseWithServerError(ctx, err)
-		return
+		return nil, err
 	}
 
 	mergeList := make(map[string]*logic.RegistryCacheSetting)
@@ -30,11 +54,88 @@ func (c Setting) List(ctx *gin.Context) {
 				tmpKey += "," + key1
 			}
 		}
-		val.Host = tmpKey
-		mergeList[tmpKey] = val
+		mergedSetting := *val
+		mergedSetting.Host = tmpKey
+		mergeList[tmpKey] = &mergedSetting
+	}
+	return mergeList, nil
+}
+
+func (c Setting) List(ctx *gin.Context) {
+	mergeList, err := mergeRegistryCacheList()
+	if err != nil {
+		c.JsonResponseWithServerError(ctx, err)
+		return
 	}
 
 	c.JsonResponseWithoutError(ctx, mergeList)
+}
+
+func (c Setting) CommonList(ctx *gin.Context) {
+	list, err := mergeRegistryCacheList()
+	if err != nil {
+		c.JsonResponseWithServerError(ctx, err)
+		return
+	}
+
+	c.JsonResponseWithoutError(ctx, buildCommonRegistryCacheList(list))
+}
+
+func buildCommonRegistryCacheList(list map[string]*logic.RegistryCacheSetting) map[string]commonRegistryCacheSetting {
+	// 公开接口只返回首页所需字段，避免缓存仓库凭据、源仓库凭据、代理配置、
+	// 缓存规则以及后续新增的内部字段被意外暴露。
+	commonList := make(map[string]commonRegistryCacheSetting)
+	for group, setting := range list {
+		if group == "global" {
+			commonList[group] = commonRegistryCacheSetting{
+				Extra: &commonExtra{
+					PageSetting: commonPageSettingFromExtra(setting.Extra),
+				},
+			}
+			continue
+		}
+
+		commonSetting := commonRegistryCacheSetting{}
+		for _, source := range setting.RegistrySources {
+			if serverURL := sanitizeCommonURL(source.ServerUrl); serverURL != "" {
+				commonSetting.RegistrySources = append(commonSetting.RegistrySources, commonRegistrySource{
+					ServerURL: serverURL,
+				})
+			}
+		}
+		commonList[group] = commonSetting
+	}
+	return commonList
+}
+
+func commonPageSettingFromExtra(extra map[string]interface{}) *commonPageSetting {
+	value, exists := extra["page_setting"]
+	if !exists {
+		return nil
+	}
+
+	content, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	pageSetting := commonPageSetting{}
+	if err = json.Unmarshal(content, &pageSetting); err != nil {
+		return nil
+	}
+	return &pageSetting
+}
+
+func sanitizeCommonURL(value string) string {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return ""
+	}
+
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func (c Setting) Set(ctx *gin.Context) {
@@ -87,7 +188,7 @@ func (c Setting) Get(ctx *gin.Context) {
 
 	setting := logic.Setting{}.GetStorageCacheSetting(host[0])
 
-	if setting != nil && setting.CacheRegistry.CacheNamespacePrefix != "" {
+	if setting != nil && host[0] != "global" && setting.CacheRegistry.CacheNamespacePrefix != "" {
 		tmpSetting := *setting
 		tmpSetting.CacheRegistry.ServerUrl = tmpSetting.CacheRegistry.ServerUrl + "/" + tmpSetting.CacheRegistry.CacheNamespacePrefix
 		tmpSetting.Host = params.Host

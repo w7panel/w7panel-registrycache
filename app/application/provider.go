@@ -25,6 +25,7 @@ func (p Provider) RegisterHttpRoutes(server *httpServer.Server) {
 			context.Status(http.StatusOK)
 		})
 
+		engine.Any("/api/setting/common-list", middleware.Cors{}.Process, controller.Setting{}.CommonList)
 		engine.Any("/api/setting/set", middleware.Cors{}.Process, middleware.Auth{}.Process, controller.Setting{}.Set)
 		engine.Any("/api/setting/get", middleware.Cors{}.Process, middleware.Auth{}.Process, controller.Setting{}.Get)
 		engine.Any("/api/setting/list", middleware.Cors{}.Process, middleware.Auth{}.Process, controller.Setting{}.List)
