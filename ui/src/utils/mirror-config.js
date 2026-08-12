@@ -8,39 +8,77 @@ export const MIRROR_CONFIG_TYPES = [
 const trimSlash = (value = '') => value.replace(/\/+$/, '');
 const withoutProtocol = (value = '') => trimSlash(value).replace(/^https?:\/\//i, '');
 const quoteToml = (value = '') => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+const quoteTomlArray = (values) => values.map((value) => `"${quoteToml(value)}"`).join(', ');
+
+const groupSourcesByOrigin = (sources) => {
+    const groups = new Map();
+    sources.forEach((source) => {
+        const originUrl = trimSlash(source.origin?.trim() || '');
+        if (!originUrl) return;
+        if (!groups.has(originUrl)) groups.set(originUrl, []);
+        groups.get(originUrl).push(source);
+    });
+    return Array.from(groups, ([originUrl, mirrors]) => ({
+        originUrl,
+        originLocation: withoutProtocol(originUrl),
+        mirrors,
+    }));
+};
+
+const registryNamespace = (originUrl) => {
+    try {
+        return new URL(originUrl).host;
+    } catch (e) {
+        return withoutProtocol(originUrl).split('/')[0];
+    }
+};
 
 const generateDocker = (sources) => JSON.stringify({
     'registry-mirrors': sources.map((item) => trimSlash(item.url)),
 }, null, 2);
 
 const generatePodman = (sources) => {
-    const mirrors = sources.map((item) => `[[registry.mirror]]
+    const groups = groupSourcesByOrigin(sources);
+    if (!groups.length) return '';
+    const registries = groups.map(({ originLocation, mirrors }) => {
+        const mirrorConfig = mirrors.map((item) => `[[registry.mirror]]
 location = "${quoteToml(withoutProtocol(item.url))}"
 insecure = false`).join('\n\n');
-    return `unqualified-search-registries = ["docker.io"]
+        return `[[registry]]
+prefix = "${quoteToml(originLocation)}"
+location = "${quoteToml(originLocation)}"
 
-[[registry]]
-prefix = "docker.io"
-location = "docker.io"
+${mirrorConfig}`;
+    }).join('\n\n');
+    return `unqualified-search-registries = [${quoteTomlArray(groups.map((item) => item.originLocation))}]
 
-${mirrors}`;
+${registries}`;
 };
 
 const generateContainerd = (sources) => {
-    const endpoints = sources.map((item) => `"${quoteToml(trimSlash(item.url))}"`).join(', ');
+    const groups = groupSourcesByOrigin(sources);
+    if (!groups.length) return '';
+    const registries = groups.map(({ originLocation, mirrors }) => {
+        const endpoints = quoteTomlArray(mirrors.map((item) => trimSlash(item.url)));
+        return `[plugins."io.containerd.grpc.v1.cri".registry.mirrors."${quoteToml(originLocation)}"]
+  endpoint = [${endpoints}]`;
+    }).join('\n\n');
     return `version = 2
 
-[plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
-  endpoint = [${endpoints}]`;
+${registries}`;
 };
 
 const generateNerdctl = (sources) => {
-    const hosts = sources.map((item) => `[host."${quoteToml(trimSlash(item.url))}"]
+    const groups = groupSourcesByOrigin(sources);
+    if (!groups.length) return '';
+    return groups.map(({ originUrl, mirrors }) => {
+        const hosts = mirrors.map((item) => `[host."${quoteToml(trimSlash(item.url))}"]
   capabilities = ["pull", "resolve"]`).join('\n\n');
-    return `# 保存为 /etc/containerd/certs.d/docker.io/hosts.toml
-server = "https://registry-1.docker.io"
+        return `# 保存为 /etc/containerd/certs.d/${registryNamespace(originUrl)}/hosts.toml
+server = "${quoteToml(originUrl)}"
 
 ${hosts}`;
+    }).join('\n\n# ------------------------------\n\n');
 };
 
 export const generateMirrorConfig = (type, sources) => {

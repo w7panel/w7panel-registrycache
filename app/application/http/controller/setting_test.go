@@ -58,8 +58,11 @@ func TestBuildCommonRegistryCacheListFiltersSensitiveFields(t *testing.T) {
 		t.Fatalf("marshal common list: %v", err)
 	}
 	response := string(encoded)
-	if !strings.Contains(response, "https://origin.example.com/v2") {
-		t.Fatalf("sanitized source registry is missing from response: %s", response)
+	if !strings.Contains(response, "https://fallback.example.com/v2") {
+		t.Fatalf("sanitized fallback origin registry is missing from response: %s", response)
+	}
+	if strings.Contains(response, "https://origin.example.com/v2") {
+		t.Fatalf("regular registry sources must not be included in public response: %s", response)
 	}
 	if !strings.Contains(response, "# Public home") {
 		t.Fatalf("global page settings are missing from response: %s", response)
@@ -92,6 +95,15 @@ func TestSanitizeCommonURL(t *testing.T) {
 	want := "https://origin.example.com/v2"
 	if got := sanitizeCommonURL("https://user:pass@origin.example.com/v2?token=secret#internal"); got != want {
 		t.Fatalf("sanitizeCommonURL() = %q, want %q", got, want)
+	}
+	if got := sanitizeCommonURL("origin.example.com/v2"); got != want {
+		t.Fatalf("sanitizeCommonURL(host-only) = %q, want %q", got, want)
+	}
+	if got := sanitizeCommonURL("//origin.example.com/v2"); got != want {
+		t.Fatalf("sanitizeCommonURL(protocol-relative) = %q, want %q", got, want)
+	}
+	if got := sanitizeCommonURL("10.0.0.5:5000/v2"); got != "https://10.0.0.5:5000/v2" {
+		t.Fatalf("sanitizeCommonURL(ip) = %q, want https://10.0.0.5:5000/v2", got)
 	}
 	if got := sanitizeCommonURL("invalid"); got != "" {
 		t.Fatalf("sanitizeCommonURL(invalid) = %q, want empty", got)

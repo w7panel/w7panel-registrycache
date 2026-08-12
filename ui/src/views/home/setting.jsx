@@ -1,4 +1,4 @@
-import { ref,onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import ImageCache from './setting-components/ImageCache';
 import OriginConfig from './setting-components/OriginConfig';
 import CacheRepositoryForm from '@/components/cache-repository-form.vue';
@@ -37,7 +37,11 @@ export default {
         const refCache = ref(null);
         const refOrigin = ref(null);
         const extra = ref({});
+        const loading = ref(true);
+        const loadError = ref(false);
+        const saving = ref(false);
         const globalRepositoryLoading = ref(true);
+        const globalRepositoryError = ref(false);
         const globalRepository = ref(createRepository());
         const cacheRepository = ref({
             ...createRepository(),
@@ -53,6 +57,7 @@ export default {
 
         const loadGlobalRepository = async () => {
             globalRepositoryLoading.value = true;
+            globalRepositoryError.value = false;
             try {
                 globalRepository.value = {
                     ...createRepository(),
@@ -60,6 +65,7 @@ export default {
                 };
             } catch (e) {
                 globalRepository.value = createRepository();
+                globalRepositoryError.value = true;
             } finally {
                 globalRepositoryLoading.value = false;
             }
@@ -70,12 +76,16 @@ export default {
             cacheRepository.value.storage_path = value.startsWith('/') ? value : `/${value}`;
         };
 
-        const getData = ()=>{
-            if(!group){return}
-            axios.post('/api/setting/get',{
-                group: group
-            }).then(res=>{
-                let data = res?.data?.data || {};
+        const getData = async () => {
+            if (!group) {
+                loading.value = false;
+                return;
+            }
+            loading.value = true;
+            loadError.value = false;
+            try {
+                const res = await axios.post('/api/setting/get', { group });
+                const data = res?.data?.data || {};
                 appData.value = data;
                 extra.value = data.extra || {};
                 const repository = cacheRegistryToRepository(data.cache_registry);
@@ -89,7 +99,11 @@ export default {
                     storage_path: storedRepository.storage_path || repository.storage_path || '/',
                 };
                 normalizeRepositoryPath();
-            })
+            } catch (e) {
+                loadError.value = true;
+            } finally {
+                loading.value = false;
+            }
             
             // let paneltoken = window.$wujie?.props?.paneltoken;
             // if(ingress_name){
@@ -101,7 +115,7 @@ export default {
             //         ingressData.value = res?.data;
             //     }).catch(()=>{})
             // }
-        }
+        };
 
         const activeCacheRepository = () => {
             const repository = cacheRepository.value.mode === 'global'
@@ -131,8 +145,12 @@ export default {
             };
         };
 
-        const submit = ()=>{
+        const submit = async () => {
             normalizeRepositoryPath();
+            if (globalRepositoryError.value && cacheRepository.value.mode === 'global') {
+                ElMessage.warning('全局缓存仓库加载失败，请重试后再保存');
+                return;
+            }
             if (cacheRepository.value.mode === 'global' && !globalRepository.value.repository_url) {
                 ElMessage.warning('请先配置全局缓存仓库');
                 return;
@@ -150,6 +168,11 @@ export default {
                 }));
             const originForm = refOrigin.value?.form;
             const originHost = originForm?.server_url_after?.trim().replace(/\/+$/, '');
+            if (registrySources.length === 0 && !originHost) {
+                ElMessage.warning('请至少配置一个镜像仓库源或源站仓库');
+                tabsActive.value = '1';
+                return;
+            }
             const originRegistry = originHost ? {
                 server_url: originForm.server_url_pre + originHost,
                 username: originForm.username || '',
@@ -191,15 +214,19 @@ export default {
                 i.cache_ttl = Number(i.cache_ttl) || 0;
             })
             
-            axios.post('/api/setting/set',o).then(res=>{
+            saving.value = true;
+            try {
+                await axios.post('/api/setting/set', o);
                 ElMessage.success('操作成功');
-            })
+                await getData();
+            } finally {
+                saving.value = false;
+            }
         }
 
 
         onMounted(()=>{
-            loadGlobalRepository();
-            getData();
+            Promise.all([loadGlobalRepository(), getData()]);
         })
 
         return ()=>(<div class="padding-20">
@@ -216,6 +243,17 @@ export default {
                 </div>
 
             </div> : null}
+            {loadError.value ? <el-alert
+                title="站点配置加载失败，请稍后重试"
+                type="warning"
+                show-icon
+                closable={false}
+                class="mb-20"
+                v-slots={{
+                    default: () => <el-button size="small" onClick={getData}>重新加载</el-button>,
+                }}
+            /> : null}
+            {loading.value ? <el-skeleton rows={8} animated /> : !loadError.value ? <>
             <el-tabs
                 modelValue={tabsActive.value}
                 onUpdate:modelValue={e => {tabsActive.value = e;} }
@@ -256,10 +294,20 @@ export default {
                             <el-radio-button value="global" label="global">全局配置</el-radio-button>
                             <el-radio-button value="custom" label="custom">自定义</el-radio-button>
                         </el-radio-group>
-                        <el-button onClick={() => router.push('/cache/repository')}>编辑全局配置</el-button>
                     </div>
 
+                    {!globalRepositoryLoading.value && globalRepositoryError.value
+                        ? <el-alert
+                            title="全局缓存仓库加载失败，请稍后重试"
+                            type="warning"
+                            show-icon
+                            closable={false}
+                            class="mb-20"
+                        />
+                        : null}
+
                     {!globalRepositoryLoading.value
+                        && !globalRepositoryError.value
                         && cacheRepository.value.mode === 'global'
                         && !globalRepository.value.repository_url
                         ? <el-alert
@@ -279,12 +327,20 @@ export default {
                             inherited={cacheRepository.value.mode === 'global'}
                             onUpdate:modelValue={updateCacheRepository}
                         />}
+                    {cacheRepository.value.mode === 'global' ? <el-alert
+                        title="仓库地址和凭据继承全局配置，存储目录仍由当前站点单独设置。"
+                        type="info"
+                        show-icon
+                        closable={false}
+                        class="mt-20"
+                    /> : null}
                 </el-tab-pane>
             </el-tabs>
 
             <div className='mt-20'>
-                <el-button type="primary" onClick={submit}>保存</el-button>
+                <el-button type="primary" loading={saving.value} onClick={submit}>保存</el-button>
             </div>
+            </> : null}
         </div>)
     }
 }

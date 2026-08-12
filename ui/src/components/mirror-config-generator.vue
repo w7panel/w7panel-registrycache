@@ -25,7 +25,6 @@
                 <span>推荐选择 3～5 个站点</span>
             </div>
             <div class="source-actions">
-                <el-button :disabled="!sources.length" @click="useRecommended">使用推荐配置</el-button>
                 <el-button :disabled="!sources.length" @click="selectAll">全选</el-button>
                 <el-button :disabled="!selectedIds.length" @click="clearSelection">清空</el-button>
             </div>
@@ -40,11 +39,19 @@
                 border
                 class="source-option"
             >
-                <span class="source-name">{{ source.name || source.domain }}</span>
-                <span class="source-url">{{ source.url }}</span>
+                <span class="source-name">{{ source.origin || '未配置源站地址' }}</span>
+                <span class="source-url">{{ source.domain }}</span>
             </el-checkbox>
         </el-checkbox-group>
         <el-empty v-else description="暂未配置可用站点" :image-size="72" class="source-empty" />
+        <el-alert
+            v-if="configType !== 'docker' && missingOriginSources.length"
+            :title="`${missingOriginSources.length} 个已选站点未配置源站地址，不会写入当前配置`"
+            type="warning"
+            show-icon
+            :closable="false"
+            class="source-warning"
+        />
 
         <div class="config-result">
             <div class="result-heading">
@@ -58,7 +65,7 @@
                     复制配置
                 </el-button>
             </div>
-            <pre><code>{{ generatedConfig || '// 请先选择镜像源' }}</code></pre>
+            <pre><code>{{ generatedConfig || emptyConfigHint }}</code></pre>
         </div>
     </section>
 </template>
@@ -85,8 +92,18 @@ export default {
             const selected = new Set(this.selectedIds);
             return this.sources.filter((item) => selected.has(item.id));
         },
+        missingOriginSources() {
+            return this.selectedSources.filter((item) => !item.origin?.trim());
+        },
         generatedConfig() {
             return generateMirrorConfig(this.configType, this.selectedSources);
+        },
+        emptyConfigHint() {
+            if (!this.selectedSources.length) return '// 请先选择镜像源';
+            if (this.configType !== 'docker' && this.missingOriginSources.length === this.selectedSources.length) {
+                return '// 已选站点均未配置源站地址';
+            }
+            return '// 暂无可生成的配置';
         },
     },
     watch: {
@@ -94,15 +111,11 @@ export default {
             handler(value) {
                 const availableIds = new Set(value.map((item) => item.id));
                 this.selectedIds = this.selectedIds.filter((id) => availableIds.has(id));
-                if (!this.selectedIds.length && value.length) this.useRecommended();
             },
             immediate: true,
         },
     },
     methods: {
-        useRecommended() {
-            this.selectedIds = this.sources.slice(0, 5).map((item) => item.id);
-        },
         selectAll() {
             this.selectedIds = this.sources.map((item) => item.id);
         },
@@ -152,6 +165,7 @@ h3 { margin-bottom: 6px; color: #17233d; font-size: 16px; }
 .source-name { color: #1d2939; font-weight: 600; }
 .source-url { margin-top: 7px; color: #7a8499; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
 .source-empty { margin-top: 18px; padding: 16px 0; background: #f8faff; border-radius: 12px; }
+.source-warning { margin-top: 18px; }
 .config-result { margin-top: 28px; }
 .result-heading { align-items: center; margin-bottom: 12px; }
 .result-heading :deep(.el-button .el-icon) { margin-right: 6px; }

@@ -38,7 +38,7 @@ export default {
                 show-icon
                 closable={false}
                 class="mb-20"
-                title="源站配置可留空；仅当缓存仓库和所有镜像源都不可用时，才会回源到此仓库。"
+                title="源站是最终兜底仓库；未指定固定镜像源时，会在其他镜像仓库源均不可用后尝试。若没有镜像仓库源，则必须配置源站。"
             />
             <el-form model={form.value} label-width="auto" class="padding-20">
                 <el-form-item label="源站仓库地址">
@@ -71,6 +71,7 @@ export default {
                         onUpdate:modelValue={value => form.value.password = value}
                         placeholder="请输入"
                         type="password"
+                        show-password
                     />
                 </el-form-item>
                 <el-form-item label="访问代理地址">

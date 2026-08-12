@@ -21,14 +21,11 @@ export default defineConfig({
     server: {
     proxy: {
         '/api': {
-            target: 'https://idc.w7.com',
-            rewrite: (path) => {
-                return '/panel-api/v1/microapp/w7-registrycache-tluypvia/proxy' + path
-            },
+            target: 'http://172.16.1.137:8000',
             changeOrigin: true
         },
         '/k8s-proxy': {
-            target: 'https://idc.w7.com',
+            target: 'http://172.16.1.137:8000',
             changeOrigin: true
         }
     }
