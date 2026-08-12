@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,6 +46,7 @@ type RegistryCacheSetting struct {
 	CacheRegistry        CacheStorageRegistry   `json:"cache_registry"`
 	RepositoryCacheRules []RepositoryCacheRule  `json:"cache_rules"`
 	RegistrySources      []RegistrySource       `json:"registry_sources"`
+	OriginRegistry       RegistrySource         `json:"origin_registry"`
 	Extra                map[string]interface{} `json:"extra"`
 	Parent               string                 `json:"parent"`
 }
@@ -61,14 +63,14 @@ func (l Setting) SetStorageCacheSetting(host string, cacheSetting RegistryCacheS
 			return cacheSetting.RepositoryCacheRules[i].Weight < cacheSetting.RepositoryCacheRules[j].Weight
 		})
 	}
+	if err := l.NormalizeCacheRegistry(&cacheSetting.CacheRegistry); err != nil {
+		return err
+	}
 	if host != globalSettingGroup && cacheRepositoryMode(cacheSetting.Extra) == "global" {
-		// 全局模式只持久化继承标记，仓库地址和凭据在读取时动态解析，
-		// 这样更新全局仓库后所有站点可以立即生效。
-		cacheSetting.CacheRegistry = CacheStorageRegistry{}
-	} else {
-		if err := l.NormalizeCacheRegistry(&cacheSetting.CacheRegistry); err != nil {
-			return err
-		}
+		// 全局模式只继承仓库连接信息，保留站点自己的存储目录。
+		cacheSetting.CacheRegistry.ServerUrl = ""
+		cacheSetting.CacheRegistry.Username = ""
+		cacheSetting.CacheRegistry.Password = ""
 	}
 
 	settingContent, err := json.Marshal(cacheSetting)
@@ -84,8 +86,9 @@ func (l Setting) SetStorageCacheSetting(host string, cacheSetting RegistryCacheS
 		return err
 	}
 
-	if cacheSetting.RegistrySources != nil {
-		err = RegistryClient{}.ResetRegistryClient(cacheSetting.Host, cacheSetting.RegistrySources)
+	registryClients := registryClientSources(cacheSetting)
+	if len(registryClients) > 0 {
+		err = RegistryClient{}.ResetRegistryClient(cacheSetting.Host, registryClients)
 		if err != nil {
 			return err
 		}
@@ -101,7 +104,7 @@ func (l Setting) SetStorageCacheSetting(host string, cacheSetting RegistryCacheS
 	}
 
 	defaultStorageSettingMap.Delete(host)
-	RegistryServer{}.ResetRegistryServerSelector(host, cacheSetting.RegistrySources)
+	RegistryServer{}.ResetRegistryServerSelector(host, registrySelectorSources(cacheSetting))
 
 	return nil
 }
@@ -127,13 +130,14 @@ func (l Setting) GetStorageCacheSetting(host string) *RegistryCacheSetting {
 			return nil
 		}
 
-		if cacheSetting.RegistrySources != nil {
-			err = RegistryClient{}.ResetRegistryClient(cacheSetting.Host, cacheSetting.RegistrySources)
+		registryClients := registryClientSources(*cacheSetting)
+		if len(registryClients) > 0 {
+			err = RegistryClient{}.ResetRegistryClient(cacheSetting.Host, registryClients)
 			if err != nil {
 				slog.Error("GetStorageCacheSetting: ResetRegistryClient() error(%v)", err)
 			}
 
-			RegistryServer{}.ResetRegistryServerSelector(host, cacheSetting.RegistrySources)
+			RegistryServer{}.ResetRegistryServerSelector(host, registrySelectorSources(*cacheSetting))
 		}
 
 		if cacheSetting.CacheRegistry.Username != "" {
@@ -160,12 +164,7 @@ func (l Setting) GetStorageCacheSetting(host string) *RegistryCacheSetting {
 	}
 
 	resolved := *cacheSetting
-	resolved.CacheRegistry = globalSetting.CacheRegistry
-	sitePath := strings.Trim(cacheRepositoryStoragePath(cacheSetting.Extra), "/")
-	if sitePath != "" {
-		globalPath := strings.Trim(resolved.CacheRegistry.CacheNamespacePrefix, "/")
-		resolved.CacheRegistry.CacheNamespacePrefix = strings.Trim(globalPath+"/"+sitePath, "/")
-	}
+	resolved.CacheRegistry = resolveGlobalCacheRegistry(globalSetting.CacheRegistry, *cacheSetting)
 	if resolved.CacheRegistry.ServerUrl != "" {
 		RegistryClient{}.SetRegistryClientCredential(resolved.Host, resolved.CacheRegistry.ServerUrl, types.Registry{
 			Credential: &types.Credential{
@@ -177,6 +176,29 @@ func (l Setting) GetStorageCacheSetting(host string) *RegistryCacheSetting {
 	return &resolved
 }
 
+func resolveGlobalCacheRegistry(globalRegistry CacheStorageRegistry, siteSetting RegistryCacheSetting) CacheStorageRegistry {
+	globalRegistry.CacheNamespacePrefix = siteSetting.CacheRegistry.CacheNamespacePrefix
+	return globalRegistry
+}
+
+func registryClientSources(setting RegistryCacheSetting) []RegistrySource {
+	sources := append([]RegistrySource(nil), setting.RegistrySources...)
+	if setting.OriginRegistry.ServerUrl != "" {
+		sources = append(sources, setting.OriginRegistry)
+	}
+	return sources
+}
+
+func registrySelectorSources(setting RegistryCacheSetting) []RegistrySource {
+	sources := append([]RegistrySource(nil), setting.RegistrySources...)
+	if setting.OriginRegistry.ServerUrl != "" {
+		origin := setting.OriginRegistry
+		origin.Weight = math.MaxInt
+		sources = append(sources, origin)
+	}
+	return sources
+}
+
 func cacheRepositoryMode(extra map[string]interface{}) string {
 	repository, ok := extra["cache_repository"].(map[string]interface{})
 	if !ok {
@@ -184,15 +206,6 @@ func cacheRepositoryMode(extra map[string]interface{}) string {
 	}
 	mode, _ := repository["mode"].(string)
 	return mode
-}
-
-func cacheRepositoryStoragePath(extra map[string]interface{}) string {
-	repository, ok := extra["cache_repository"].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	storagePath, _ := repository["storage_path"].(string)
-	return storagePath
 }
 
 func (l Setting) DelStorageCacheSetting(host string) {

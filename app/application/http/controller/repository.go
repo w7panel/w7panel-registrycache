@@ -31,11 +31,10 @@ func (c Repository) Handler(ctx *gin.Context) {
 		c.JsonResponseWithServerError(ctx, errors.New("缓存仓库配置错误"))
 		return
 	}
-	if setting.RegistrySources == nil {
-		c.JsonResponseWithServerError(ctx, errors.New("源仓库配置错误"))
+	if !hasRepositoryUpstream(*setting) {
+		c.JsonResponseWithServerError(ctx, errors.New("镜像源和源站配置错误"))
 		return
 	}
-
 	slog.Info("req path", "fullpath", ctx.Request.URL.Path)
 
 	var params *ParamsValidate
@@ -145,6 +144,18 @@ func (c Repository) Handler(ctx *gin.Context) {
 	}
 
 	ctx.Status(http.StatusOK)
+}
+
+func hasRepositoryUpstream(setting logic.RegistryCacheSetting) bool {
+	if strings.TrimSpace(setting.OriginRegistry.ServerUrl) != "" {
+		return true
+	}
+	for _, source := range setting.RegistrySources {
+		if strings.TrimSpace(source.ServerUrl) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (c Repository) handlerV2(ctx *gin.Context) {

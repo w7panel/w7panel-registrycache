@@ -1,5 +1,6 @@
 import { ref,onMounted } from 'vue';
 import ImageCache from './setting-components/ImageCache';
+import OriginConfig from './setting-components/OriginConfig';
 import CacheRepositoryForm from '@/components/cache-repository-form.vue';
 import axios from 'axios';
 import { useRoute, useRouter } from 'vue-router'
@@ -27,12 +28,14 @@ export default {
             cache_registry: {},
             cache_rules: [],
             registry_sources: [],
+            origin_registry: {},
             extra: {},
         });
 
         // const open = ref(false);
         const tabsActive = ref('1');
         const refCache = ref(null);
+        const refOrigin = ref(null);
         const extra = ref({});
         const globalRepositoryLoading = ref(true);
         const globalRepository = ref(createRepository());
@@ -139,16 +142,31 @@ export default {
                 return;
             }
 
+            const registrySources = (refCache.value?.form.registry_sources || [])
+                .filter(item => item.server_url_after?.trim())
+                .map(item => ({
+                    ...item,
+                    server_url: item.server_url_pre + item.server_url_after.trim().replace(/\/+$/, ''),
+                }));
+            const originForm = refOrigin.value?.form;
+            const originHost = originForm?.server_url_after?.trim().replace(/\/+$/, '');
+            const originRegistry = originHost ? {
+                server_url: originForm.server_url_pre + originHost,
+                username: originForm.username || '',
+                password: originForm.password || '',
+                weight: 0,
+                proxy: originForm.proxy?.server_url ? {
+                    server_url: originForm.proxy.server_url,
+                    port: Number(originForm.proxy.port) || 0,
+                } : null,
+            } : {};
+
             let o = {
                 group: group,
                 cache_storage_registry: repositoryToCacheRegistry(activeCacheRepository()),
                 repository_cache_rules: refCache.value.form.cache_rules || [],
-                registry_sources: (refCache.value.form.registry_sources || []).map(i=>{
-                    return {
-                        ...i,
-                        server_url: i.server_url_pre + i.server_url_after,
-                    }
-                }),
+                registry_sources: registrySources,
+                origin_registry: originRegistry,
                 extra: {
                     ...extra.value,
                     ingress_name: ingress_name,
@@ -207,6 +225,13 @@ export default {
                         ref={refCache}
                         data={appData.value}
                     ></ImageCache>
+                    <div class="mt-30">
+                        <div class="b mb-16">源站配置</div>
+                        <OriginConfig
+                        ref={refOrigin}
+                        data={appData.value}
+                        />
+                    </div>
                 </el-tab-pane>
                 <el-tab-pane label="缓存镜像仓库配置" name="2">
                     <el-alert

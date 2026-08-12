@@ -3,7 +3,7 @@ package logic
 import (
 	"context"
 	"log/slog"
-	"math/rand"
+	"sort"
 	"sync"
 
 	"gitee.com/we7coreteam/w7-registry-cache/common/service/registry/client"
@@ -25,16 +25,30 @@ type registrySourceResult struct {
 }
 
 func (l RegistryServer) ResetRegistryServerSelector(host string, registries []RegistrySource) {
-	registryServerUrls := make([]string, 0, len(registries))
-	seen := make(map[string]bool, len(registries))
+	weightedRegistries := make([]RegistrySource, 0, len(registries))
+	registryIndexes := make(map[string]int, len(registries))
 	for _, registry := range registries {
-		if registry.ServerUrl == "" || seen[registry.ServerUrl] {
+		if registry.ServerUrl == "" {
 			continue
 		}
-		seen[registry.ServerUrl] = true
-		registryServerUrls = append(registryServerUrls, registry.ServerUrl)
+		index, exists := registryIndexes[registry.ServerUrl]
+		if !exists {
+			registryIndexes[registry.ServerUrl] = len(weightedRegistries)
+			weightedRegistries = append(weightedRegistries, registry)
+			continue
+		}
+		if registry.Weight < weightedRegistries[index].Weight {
+			weightedRegistries[index] = registry
+		}
 	}
-	defaultRegistryServerMap.Store(host, registryServerUrls)
+	sort.SliceStable(weightedRegistries, func(i, j int) bool {
+		return weightedRegistries[i].Weight < weightedRegistries[j].Weight
+	})
+	registryURLs := make([]string, 0, len(weightedRegistries))
+	for _, registry := range weightedRegistries {
+		registryURLs = append(registryURLs, registry.ServerUrl)
+	}
+	defaultRegistryServerMap.Store(host, registryURLs)
 }
 
 func (l RegistryServer) walkRegistrySourcesFromRule(ctx context.Context, host string, cacheRule *RepositoryCacheRule, check func(registry string) registrySourceResult, handle func(result registrySourceResult) bool) {
@@ -44,14 +58,14 @@ func (l RegistryServer) walkRegistrySourcesFromRule(ctx context.Context, host st
 	}
 
 	resultChan := make(chan registrySourceResult, len(sources))
-	for _, serverUrl := range sources {
-		go func(serverUrl string) {
+	for _, serverURL := range sources {
+		go func(serverURL string) {
 			if check == nil {
-				resultChan <- registrySourceResult{registry: serverUrl}
+				resultChan <- registrySourceResult{registry: serverURL}
 				return
 			}
-			resultChan <- check(serverUrl)
-		}(serverUrl)
+			resultChan <- check(serverURL)
+		}(serverURL)
 	}
 
 	for i := 0; i < len(sources); i++ {
@@ -69,36 +83,18 @@ func (l RegistryServer) walkRegistrySourcesFromRule(ctx context.Context, host st
 }
 
 func (l RegistryServer) registrySourcesFromRule(ctx context.Context, host string, cacheRule *RepositoryCacheRule) []string {
-	assignRegistry := ""
-	if cacheRule != nil {
-		assignRegistry = cacheRule.AssignRegistry
+	if l.contextDone(ctx) {
+		return nil
 	}
-	if assignRegistry != "" {
-		if l.contextDone(ctx) {
-			return nil
-		}
-		return []string{assignRegistry}
+	if cacheRule != nil && cacheRule.AssignRegistry != "" {
+		return []string{cacheRule.AssignRegistry}
 	}
 
 	val, ok := defaultRegistryServerMap.Load(host)
 	if !ok {
 		return nil
 	}
-	registryServerUrls := val.([]string)
-	if len(registryServerUrls) == 0 {
-		return nil
-	}
-
-	sources := make([]string, 0, len(registryServerUrls))
-	for _, index := range rand.Perm(len(registryServerUrls)) {
-		if l.contextDone(ctx) {
-			return sources
-		}
-
-		sources = append(sources, registryServerUrls[index])
-	}
-
-	return sources
+	return val.([]string)
 }
 
 func (l RegistryServer) WalkManifestRegistrySourcesFromRule(ctx context.Context, host, repositoryName, reference string, cacheRule *RepositoryCacheRule, handleAvailable func(registry string, registryClient client.Client, manifest *distribution.Descriptor) bool) {

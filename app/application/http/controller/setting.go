@@ -143,14 +143,14 @@ func (c Setting) Set(ctx *gin.Context) {
 		Host                 string                      `json:"group" binding:"required"`
 		CacheStorageRegistry logic.CacheStorageRegistry  `json:"cache_storage_registry"  binding:"required"`
 		RepositoryCacheRules []logic.RepositoryCacheRule `json:"repository_cache_rules"  binding:"required"`
-		RegistrySources      []logic.RegistrySource      `json:"registry_sources"  binding:"required"`
+		RegistrySources      []logic.RegistrySource      `json:"registry_sources"`
+		OriginRegistry       logic.RegistrySource        `json:"origin_registry"`
 		Extra                map[string]interface{}      `json:"extra"`
 	}
 	params := ParamsValidate{}
 	if !c.Validate(ctx, &params) {
 		return
 	}
-	params.CacheStorageRegistry.CacheNamespacePrefix = ""
 
 	host := strings.Split(params.Host, ",")
 	parent := ""
@@ -160,6 +160,7 @@ func (c Setting) Set(ctx *gin.Context) {
 			CacheRegistry:        params.CacheStorageRegistry,
 			RepositoryCacheRules: params.RepositoryCacheRules,
 			RegistrySources:      params.RegistrySources,
+			OriginRegistry:       params.OriginRegistry,
 			Extra:                params.Extra,
 			Parent:               parent,
 		})

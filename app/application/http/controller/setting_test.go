@@ -37,6 +37,11 @@ func TestBuildCommonRegistryCacheListFiltersSensitiveFields(t *testing.T) {
 					Password:  "source-password",
 				},
 			},
+			OriginRegistry: logic.RegistrySource{
+				ServerUrl: "https://origin-fallback-user:origin-fallback-pass@fallback.example.com/v2?token=fallback-secret",
+				Username:  "origin-fallback-user",
+				Password:  "origin-fallback-password",
+			},
 			Extra: map[string]interface{}{
 				"internal_token": "site-secret",
 			},
@@ -69,6 +74,10 @@ func TestBuildCommonRegistryCacheListFiltersSensitiveFields(t *testing.T) {
 		"source-secret",
 		"source-user",
 		"source-password",
+		"origin-fallback-user",
+		"origin-fallback-pass",
+		"origin-fallback-password",
+		"fallback-secret",
 		"repository-user",
 		"repository-secret",
 		"site-secret",

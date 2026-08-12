@@ -30,7 +30,6 @@ export default {
         },{
             immediate: true
         })
-
         expose({ form })
 
         return ()=><div className="df df-c">
@@ -158,8 +157,6 @@ export default {
             <table className="com-table mt-16">
                 <tr>
                     <td>仓库地址</td>
-                    {/* <td>用户名</td>
-                    <td>密码</td> */}
                     <td>
                         <el-tooltip content="权重值越小优先级越高">
                             <span>
@@ -178,7 +175,7 @@ export default {
                                 onUpdate:modelValue={v => i.server_url_after = v}
                                 placeholder="请输入"
                                 v-slots={{
-                                    prepend: (scope)=>(<el-select
+                                    prepend: ()=>(<el-select
                                         style="width:100px;"
                                         placeholder="请选择"
                                         modelValue={i.server_url_pre}
@@ -190,21 +187,6 @@ export default {
                                 }}
                             ></el-input>
                         </td>
-                        {/* <td>
-                            <el-input
-                                modelValue={i.username}
-                                onUpdate:modelValue={v => i.username = v}
-                                placeholder="请输入"
-                            ></el-input>
-                        </td>
-                        <td>
-                            <el-input
-                                modelValue={i.password}
-                                onUpdate:modelValue={v => i.password = v}
-                                placeholder="请输入"
-                                type="password"
-                            ></el-input>
-                        </td> */}
                         <td>
                             <el-input
                                 modelValue={i.weight}
@@ -255,7 +237,7 @@ export default {
                     </td>
                 </tr>
             </table>
-            
+
             <el-dialog
                 modelValue={setProxy.value.show}
                 onUpdate:modelValue={v => setProxy.value.show = v}
@@ -276,11 +258,7 @@ export default {
                     </div>)
                 }}
             >
-                <el-form
-                    model={setProxy.value}
-                    label-width="auto"
-                    class="padding-20"
-                >
+                <el-form model={setProxy.value} label-width="auto" class="padding-20">
                     <div className="b mb-20">访问代理</div>
                     <el-form-item label="代理地址">
                         <el-input
@@ -303,7 +281,7 @@ export default {
                             modelValue={setProxy.value.username}
                             onUpdate:modelValue={v => setProxy.value.username = v}
                             placeholder="请输入"
-                        ></el-input>
+                        />
                     </el-form-item>
                     <el-form-item label="密码">
                         <el-input
@@ -311,7 +289,7 @@ export default {
                             onUpdate:modelValue={v => setProxy.value.password = v}
                             placeholder="请输入"
                             type="password"
-                        ></el-input>
+                        />
                     </el-form-item>
                 </el-form>
             </el-dialog>
