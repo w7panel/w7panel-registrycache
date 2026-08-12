@@ -4,7 +4,10 @@ import { Plus } from '@element-plus/icons-vue'
 export default {
     props: ['data'], 
     setup(props, {expose}){
-        const form = ref({});
+        const form = ref({
+            cache_rules: [],
+            registry_sources: [],
+        });
         const setProxy = ref({
             show: false,
             index: 0,
@@ -153,7 +156,10 @@ export default {
                     </td>
                 </tr>
             </table>
-            <div className="b">镜像仓库源配置</div>
+            <div className="df ai-c jc-b df-ww" style="gap:8px;">
+                <div className="b">镜像仓库源配置</div>
+                <span className="c-99" style="font-size:12px;">按权重从小到大依次尝试</span>
+            </div>
             <table className="com-table mt-16">
                 <tr>
                     <td>仓库地址</td>

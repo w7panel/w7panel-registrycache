@@ -24,6 +24,7 @@ const saveGlobalSetting = (setting, overrides = {}) =>
         ),
         repository_cache_rules: setting.cache_rules || [],
         registry_sources: setting.registry_sources || [],
+        origin_registry: setting.origin_registry || {},
         extra: setting.extra || {},
         ...overrides,
     });

@@ -126,7 +126,7 @@ a,.c-orange,
 .mb-10{margin-bottom:10px;}
 .mb-12{margin-bottom:12px;}
 .mb-16{margin-bottom:16px;}
-.mb-20{margin-bottom:20px;}
+.mb-20{margin-bottom:20px !important;}
 .mb-30{margin-bottom:30px;}
 
 .mr-2{margin-right:2px;}

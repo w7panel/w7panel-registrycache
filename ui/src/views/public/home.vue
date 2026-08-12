@@ -2,7 +2,7 @@
     <div class="public-home">
         <header class="public-header">
             <div class="header-inner">
-                <a class="brand" href="#top" aria-label="返回顶部">
+                <button class="brand" type="button" aria-label="返回顶部" @click="scrollToSection('top')">
                     <img
                         class="brand-logo"
                         src="//cdn.w7.cc/ued/logo/logo.png?imageView2/5/w/100/h/32/format/webp"
@@ -11,15 +11,15 @@
                         height="32"
                     />
                     <span>镜像加速服务</span>
-                </a>
+                </button>
                 <nav>
-                    <a href="#guide">使用说明</a>
-                    <a href="#generator">配置生成器</a>
+                    <button type="button" @click="scrollToSection('guide')">使用说明</button>
+                    <button type="button" @click="scrollToSection('generator')">配置生成器</button>
                 </nav>
             </div>
         </header>
 
-        <main id="top">
+        <main ref="top">
             <section class="hero">
                 <div class="hero-glow hero-glow-one" />
                 <div class="hero-glow hero-glow-two" />
@@ -28,8 +28,8 @@
                     <h1>更简单、更稳定地<br />获取容器镜像</h1>
                     <p>快速生成 Docker、Podman、Containerd 和 Nerdctl 配置。</p>
                     <div class="hero-actions">
-                        <a class="primary-action" href="#generator">生成配置</a>
-                        <a class="secondary-action" href="#guide">查看使用说明</a>
+                        <button class="primary-action" type="button" @click="scrollToSection('generator')">生成配置</button>
+                        <button class="secondary-action" type="button" @click="scrollToSection('guide')">查看使用说明</button>
                     </div>
                     <div class="hero-stat">
                         <strong>{{ sources.length }}</strong>
@@ -40,7 +40,7 @@
 
             <div class="page-container">
                 <el-skeleton v-if="loading" :rows="8" animated class="content-card" />
-                <section v-else id="guide" class="content-card guide-section">
+                <section v-else ref="guide" class="content-card guide-section">
                     <div class="section-title">
                         <span>GET STARTED</span>
                         <h2>镜像加速使用说明</h2>
@@ -52,15 +52,13 @@
                             <thead>
                                 <tr>
                                     <th>站点域名</th>
-                                    <th>加速地址</th>
-                                    <th>源仓库地址</th>
+                                    <th>源站兜底地址</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr v-for="source in sources" :key="source.id">
                                     <td>{{ source.domain }}</td>
-                                    <td><code>{{ source.url }}</code></td>
-                                    <td><code>{{ source.origin || '-' }}</code></td>
+                                    <td><code>{{ source.origin || '未配置源站地址' }}</code></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -83,7 +81,7 @@
                     </div>
                 </section>
 
-                <div id="generator" class="generator-anchor">
+                <div ref="generator" class="generator-anchor">
                     <MirrorConfigGenerator :sources="sources" />
                 </div>
 
@@ -190,6 +188,9 @@ export default {
         this.load();
     },
     methods: {
+        scrollToSection(section) {
+            this.$refs[section]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
         async load() {
             try {
                 const data = responseData(await getPublicSiteList(true));
@@ -207,10 +208,7 @@ export default {
             const sourceMap = new Map();
             Object.entries(data || {}).forEach(([group, setting]) => {
                 if (group === 'global') return;
-                const origin = (setting?.registry_sources || [])
-                    .map((item) => item.server_url)
-                    .filter(Boolean)
-                    .join(', ');
+                const origin = setting?.origin_registry?.server_url || '';
                 group.split(',').map((item) => item.trim()).filter(Boolean).forEach((domain) => {
                     const protocol = domain === window.location.host ? window.location.protocol : 'https:';
                     sourceMap.set(domain, {
@@ -234,10 +232,11 @@ export default {
 .header-inner, .footer-inner { display: flex; width: min(1180px, calc(100% - 40px)); margin: 0 auto; align-items: center; justify-content: space-between; }
 .header-inner { height: 76px; }
 .brand, .footer-brand { display: flex; align-items: center; gap: 10px; color: inherit; font-size: 16px; font-weight: 700; }
+.brand { padding: 0; background: transparent; border: 0; cursor: pointer; font-family: inherit; }
 .brand-logo { display: block; width: 100px; height: 32px; object-fit: contain; }
 nav { display: flex; gap: 30px; }
-nav a { color: rgb(255 255 255 / 76%); }
-nav a:hover { color: #fff; }
+nav button { padding: 0; color: rgb(255 255 255 / 76%); background: transparent; border: 0; cursor: pointer; font: inherit; }
+nav button:hover { color: #fff; }
 .hero { position: relative; min-height: 610px; overflow: hidden; color: #fff; background: radial-gradient(circle at 72% 28%, rgb(75 125 255 / 32%), transparent 32%), linear-gradient(125deg, #0b1530 0%, #101e44 54%, #102c5a 100%); }
 .hero::after { position: absolute; right: -8%; bottom: -46%; width: 680px; height: 680px; background: repeating-linear-gradient(135deg, rgb(255 255 255 / 5%) 0 1px, transparent 1px 19px); border-radius: 50%; content: ""; }
 .hero-glow { position: absolute; border-radius: 50%; filter: blur(8px); }
@@ -248,9 +247,8 @@ nav a:hover { color: #fff; }
 .hero h1 { max-width: 720px; margin: 24px 0 20px; font-size: clamp(42px, 6vw, 68px); line-height: 1.12; letter-spacing: -.035em; }
 .hero p { max-width: 680px; margin: 0; color: rgb(225 234 255 / 72%); font-size: 17px; line-height: 1.8; }
 .hero-actions { display: flex; margin-top: 34px; gap: 12px; }
-.primary-action, .secondary-action { display: inline-flex; height: 46px; padding: 0 23px; align-items: center; justify-content: center; border-radius: 9px; font-weight: 600; }
+.primary-action, .secondary-action { display: inline-flex; height: 46px; padding: 0 23px; align-items: center; justify-content: center; border: 0; border-radius: 9px; cursor: pointer; font: inherit; font-weight: 600; }
 .primary-action { color: #fff !important; background: #3478f6; box-shadow: 0 12px 26px rgb(27 91 230 / 34%); }
-.secondary-action { color: #d8e4ff !important; border: 1px solid rgb(255 255 255 / 18%); }
 .hero-stat { position: absolute; right: 5%; bottom: 0; display: flex; width: 210px; height: 110px; padding: 22px; flex-direction: column; justify-content: center; background: rgb(14 31 66 / 74%); border: 1px solid rgb(255 255 255 / 10%); border-radius: 18px 18px 0 0; backdrop-filter: blur(12px); }
 .hero-stat strong { font-size: 32px; }
 .hero-stat span { margin-top: 4px; color: rgb(225 234 255 / 60%); }

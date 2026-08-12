@@ -196,11 +196,6 @@ export default {
                         };
                     }}
                 >添加站点</el-button>
-                <div className="df ai-c df-ww" style="gap:10px;">
-                    <el-button style="margin-left:0;" onClick={() => router.push('/cache/repository')}>缓存仓库配置</el-button>
-                    <el-button style="margin-left:0;" onClick={() => router.push('/cache/page-setting')}>页面设置</el-button>
-                    <el-button style="margin-left:0;" onClick={openPublicHome}>访问公开首页</el-button>
-                </div>
             </div>
             <el-table
                 data={tableData.value}

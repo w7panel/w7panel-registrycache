@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"net"
 	"net/url"
 	"strings"
 
@@ -33,8 +34,8 @@ type commonExtra struct {
 }
 
 type commonRegistryCacheSetting struct {
-	RegistrySources []commonRegistrySource `json:"registry_sources,omitempty"`
-	Extra           *commonExtra           `json:"extra,omitempty"`
+	OriginRegistry *commonRegistrySource `json:"origin_registry,omitempty"`
+	Extra          *commonExtra          `json:"extra,omitempty"`
 }
 
 func mergeRegistryCacheList() (map[string]*logic.RegistryCacheSetting, error) {
@@ -96,11 +97,9 @@ func buildCommonRegistryCacheList(list map[string]*logic.RegistryCacheSetting) m
 		}
 
 		commonSetting := commonRegistryCacheSetting{}
-		for _, source := range setting.RegistrySources {
-			if serverURL := sanitizeCommonURL(source.ServerUrl); serverURL != "" {
-				commonSetting.RegistrySources = append(commonSetting.RegistrySources, commonRegistrySource{
-					ServerURL: serverURL,
-				})
+		if serverURL := sanitizeCommonURL(setting.OriginRegistry.ServerUrl); serverURL != "" {
+			commonSetting.OriginRegistry = &commonRegistrySource{
+				ServerURL: serverURL,
 			}
 		}
 		commonList[group] = commonSetting
@@ -126,8 +125,25 @@ func commonPageSettingFromExtra(extra map[string]interface{}) *commonPageSetting
 }
 
 func sanitizeCommonURL(value string) string {
-	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	rawValue := strings.TrimSpace(value)
+	if rawValue == "" {
+		return ""
+	}
+	parseValue := rawValue
+	if !strings.HasPrefix(rawValue, "http://") && !strings.HasPrefix(rawValue, "https://") {
+		if strings.Contains(rawValue, "://") {
+			return ""
+		}
+		parseValue = "https://" + strings.TrimPrefix(rawValue, "//")
+	}
+	parsed, err := url.Parse(parseValue)
+	if err != nil || parsed == nil {
+		return ""
+	}
+	hostname := parsed.Hostname()
+	if hostname == "" ||
+		(!strings.Contains(hostname, ".") && hostname != "localhost" && net.ParseIP(hostname) == nil) ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return ""
 	}
 
