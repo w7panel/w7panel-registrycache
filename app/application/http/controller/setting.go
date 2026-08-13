@@ -1,9 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
-	"net"
-	"net/url"
 	"strings"
 
 	"gitee.com/we7coreteam/w7-registry-cache/app/application/logic"
@@ -13,29 +10,6 @@ import (
 
 type Setting struct {
 	controller.Abstract
-}
-
-type commonRegistrySource struct {
-	ServerURL string `json:"server_url"`
-}
-
-type commonPageSetting struct {
-	Markdown      string `json:"markdown"`
-	ICPNumber     string `json:"icp_number"`
-	ICPLink       string `json:"icp_link"`
-	PoliceNumber  string `json:"police_number"`
-	PoliceLink    string `json:"police_link"`
-	Copyright     string `json:"copyright"`
-	CopyrightLink string `json:"copyright_link"`
-}
-
-type commonExtra struct {
-	PageSetting *commonPageSetting `json:"page_setting,omitempty"`
-}
-
-type commonRegistryCacheSetting struct {
-	OriginRegistry *commonRegistrySource `json:"origin_registry,omitempty"`
-	Extra          *commonExtra          `json:"extra,omitempty"`
 }
 
 func mergeRegistryCacheList() (map[string]*logic.RegistryCacheSetting, error) {
@@ -79,79 +53,7 @@ func (c Setting) CommonList(ctx *gin.Context) {
 		return
 	}
 
-	c.JsonResponseWithoutError(ctx, buildCommonRegistryCacheList(list))
-}
-
-func buildCommonRegistryCacheList(list map[string]*logic.RegistryCacheSetting) map[string]commonRegistryCacheSetting {
-	// 公开接口只返回首页所需字段，避免缓存仓库凭据、源仓库凭据、代理配置、
-	// 缓存规则以及后续新增的内部字段被意外暴露。
-	commonList := make(map[string]commonRegistryCacheSetting)
-	for group, setting := range list {
-		if group == "global" {
-			commonList[group] = commonRegistryCacheSetting{
-				Extra: &commonExtra{
-					PageSetting: commonPageSettingFromExtra(setting.Extra),
-				},
-			}
-			continue
-		}
-
-		commonSetting := commonRegistryCacheSetting{}
-		if serverURL := sanitizeCommonURL(setting.OriginRegistry.ServerUrl); serverURL != "" {
-			commonSetting.OriginRegistry = &commonRegistrySource{
-				ServerURL: serverURL,
-			}
-		}
-		commonList[group] = commonSetting
-	}
-	return commonList
-}
-
-func commonPageSettingFromExtra(extra map[string]interface{}) *commonPageSetting {
-	value, exists := extra["page_setting"]
-	if !exists {
-		return nil
-	}
-
-	content, err := json.Marshal(value)
-	if err != nil {
-		return nil
-	}
-	pageSetting := commonPageSetting{}
-	if err = json.Unmarshal(content, &pageSetting); err != nil {
-		return nil
-	}
-	return &pageSetting
-}
-
-func sanitizeCommonURL(value string) string {
-	rawValue := strings.TrimSpace(value)
-	if rawValue == "" {
-		return ""
-	}
-	parseValue := rawValue
-	if !strings.HasPrefix(rawValue, "http://") && !strings.HasPrefix(rawValue, "https://") {
-		if strings.Contains(rawValue, "://") {
-			return ""
-		}
-		parseValue = "https://" + strings.TrimPrefix(rawValue, "//")
-	}
-	parsed, err := url.Parse(parseValue)
-	if err != nil || parsed == nil {
-		return ""
-	}
-	hostname := parsed.Hostname()
-	if hostname == "" ||
-		(!strings.Contains(hostname, ".") && hostname != "localhost" && net.ParseIP(hostname) == nil) ||
-		(parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return ""
-	}
-
-	parsed.User = nil
-	parsed.RawQuery = ""
-	parsed.ForceQuery = false
-	parsed.Fragment = ""
-	return parsed.String()
+	c.JsonResponseWithoutError(ctx, logic.BuildCommonRegistryCacheList(list))
 }
 
 func (c Setting) Set(ctx *gin.Context) {
