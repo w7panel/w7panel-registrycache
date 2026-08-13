@@ -16,11 +16,20 @@ HELM_PACKAGE_IMAGE_TAG ?= $(IMAGE_TAG)
 HELM_PACKAGE ?= $(HELM_CHART_DIR)/$(HELM_CHART_NAME)-$(HELM_CHART_VERSION).tgz
 
 IMAGE_TARGET ?= $(IMAGE_REPOSITORY):$(IMAGE_TAG)
+UI_DIR := ui
+UI_DIST_DIR := $(UI_DIR)/dist
+PUBLIC_DIR := public
 
-.PHONY: tidy dockerbuild helm-package publish beta dev test help
+.PHONY: tidy build-ui dockerbuild helm-package publish beta dev test help
 
 tidy:
 	go mod tidy
+
+build-ui:
+	npm --prefix $(UI_DIR) run build
+	rm -rf $(PUBLIC_DIR)
+	mkdir -p $(PUBLIC_DIR)
+	cp -R $(UI_DIST_DIR)/. $(PUBLIC_DIR)/
 
 dockerbuild:
 	docker build -t $(IMAGE_TARGET) .
@@ -65,6 +74,7 @@ test:
 	go test -v ./...
 
 help:
+	@echo "make build-ui - 构建前端并将产物复制到 public 目录"
 	@echo "make dockerbuild - 使用 Dockerfile 构建镜像"
 	@echo "make helm-package - 使用当前 Helm chart 打包，并临时替换镜像仓库、tag、chart version"
 	@echo "make publish - 构建镜像、打包 Helm，并推送镜像"

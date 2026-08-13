@@ -2,9 +2,13 @@ package main
 
 import (
 	"bytes"
+	"embed"
 	_ "embed"
+	"io/fs"
+	nethttp "net/http"
 
 	app2 "gitee.com/we7coreteam/w7-registry-cache/app/application"
+	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
 	app "github.com/we7coreteam/w7-rangine-go/v2/src"
 	"github.com/we7coreteam/w7-rangine-go/v2/src/core/helper"
@@ -14,6 +18,9 @@ import (
 
 //go:embed config.yaml
 var ConfigFileContent []byte
+
+//go:embed public
+var Asset embed.FS
 
 func main() {
 	newApp := app.NewApp(app.Option{
@@ -28,6 +35,14 @@ func main() {
 
 	httpServer := new(http.Provider).Register(newApp.GetConfig(), newApp.GetConsole(), newApp.GetServerManager()).Export()
 	httpServer.Use(middleware.GetPanicHandlerMiddleware())
+
+	httpServer.RegisterRouters(
+		func(engine *gin.Engine) {
+			staticFp, _ := fs.Sub(Asset, "public")
+			engine.NoRoute(gin.WrapH(nethttp.FileServer(nethttp.FS(staticFp))))
+		},
+	)
+
 	new(app2.Provider).Register(httpServer)
 
 	newApp.RunConsole()
