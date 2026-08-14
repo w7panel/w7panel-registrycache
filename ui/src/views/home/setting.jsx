@@ -175,13 +175,10 @@ export default {
             }
             const originRegistry = originHost ? {
                 server_url: originForm.server_url_pre + originHost,
-                username: originForm.username || '',
-                password: originForm.password || '',
+                username: '',
+                password: '',
                 weight: 0,
-                proxy: originForm.proxy?.server_url ? {
-                    server_url: originForm.proxy.server_url,
-                    port: Number(originForm.proxy.port) || 0,
-                } : null,
+                proxy: null,
             } : {};
 
             let o = {
@@ -264,7 +261,7 @@ export default {
                         data={appData.value}
                     ></ImageCache>
                     <div class="mt-30">
-                        <div class="b mb-16">源站配置</div>
+                        <div class="b mb-16">源站信息配置</div>
                         <OriginConfig
                         ref={refOrigin}
                         data={appData.value}
