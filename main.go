@@ -19,7 +19,7 @@ import (
 //go:embed config.yaml
 var ConfigFileContent []byte
 
-//go:embed public
+//go:embed all:public
 var Asset embed.FS
 
 func main() {
