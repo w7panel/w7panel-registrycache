@@ -41,6 +41,19 @@ jobs:
           npm ci
           npm run build
 
+      - name: Copy frontend assets to public
+        run: |
+          set -euo pipefail
+
+          if [ ! -d ui/dist ]; then
+            echo "frontend dist not found under ui/dist"
+            exit 1
+          fi
+
+          rm -rf public
+          mkdir -p public
+          cp -R ui/dist/. public/
+
       - name: Package frontend
         run: |
           set -euo pipefail
