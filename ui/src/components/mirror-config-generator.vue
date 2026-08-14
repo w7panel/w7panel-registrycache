@@ -21,32 +21,41 @@
 
         <div class="source-toolbar">
             <div>
-                <h3>选择镜像源</h3>
-                <span>推荐选择 3～5 个站点</span>
+                <h3>选择加速节点</h3>
+                <span>节点已按适用源站分组，同一源站可以选择多个节点。</span>
             </div>
             <div class="source-actions">
-                <el-button :disabled="!sources.length" @click="selectAll">全选</el-button>
+                <el-button :disabled="!selectableSources.length" @click="selectAll">全选</el-button>
                 <el-button :disabled="!selectedIds.length" @click="clearSelection">清空</el-button>
             </div>
         </div>
 
-        <el-checkbox-group v-if="sources.length" v-model="selectedIds" class="source-grid">
-            <el-checkbox
-                v-for="source in sources"
-                :key="source.id"
-                :value="source.id"
-                :label="source.id"
-                border
-                class="source-option"
-            >
-                <span class="source-name">{{ source.origin || '未配置源站地址' }}</span>
-                <span class="source-url">{{ source.domain }}</span>
-            </el-checkbox>
+        <el-checkbox-group v-if="selectableSources.length" v-model="selectedIds" class="source-groups">
+            <section v-for="group in sourceGroups" :key="group.origin" class="source-group">
+                <div class="source-group-heading">
+                    <span>适用源站</span>
+                    <code>{{ group.origin }}</code>
+                    <small>{{ group.mirrors.length }} 个节点</small>
+                </div>
+                <div class="source-grid">
+                    <el-checkbox
+                        v-for="source in group.mirrors"
+                        :key="source.id"
+                        :value="source.id"
+                        :label="source.id"
+                        border
+                        class="source-option"
+                    >
+                        <span class="source-name">{{ source.domain }}</span>
+                        <span class="source-url">{{ source.url }}</span>
+                    </el-checkbox>
+                </div>
+            </section>
         </el-checkbox-group>
-        <el-empty v-else description="暂未配置可用站点" :image-size="72" class="source-empty" />
+        <el-empty v-else :description="emptySourceDescription" :image-size="72" class="source-empty" />
         <el-alert
-            v-if="configType !== 'docker' && missingOriginSources.length"
-            :title="`${missingOriginSources.length} 个已选站点未配置源站地址，不会写入当前配置`"
+            v-if="unconfiguredSources.length"
+            :title="`${unconfiguredSources.length} 个站点未标注适用源站，无法生成运行时配置`"
             type="warning"
             show-icon
             :closable="false"
@@ -57,13 +66,23 @@
             <div class="result-heading">
                 <div>
                     <h3>生成的配置</h3>
-                    <span v-if="selectedSources.length">已选择 {{ selectedSources.length }} 个站点</span>
-                    <span v-else>请先选择镜像源</span>
+                    <span v-if="selectedSources.length">已选择 {{ selectedSources.length }} 个加速节点</span>
+                    <span v-else>请先选择加速节点</span>
                 </div>
                 <el-button type="primary" :disabled="!generatedConfig" @click="copyConfig">
                     <el-icon><CopyDocument /></el-icon>
                     复制配置
                 </el-button>
+            </div>
+            <div v-if="generatedConfig" class="config-guide">
+                <div>
+                    <span>保存位置</span>
+                    <code>{{ configGuide.path }}</code>
+                </div>
+                <div>
+                    <span>生效方式</span>
+                    <code>{{ configGuide.apply }}</code>
+                </div>
             </div>
             <pre><code>{{ generatedConfig || emptyConfigHint }}</code></pre>
         </div>
@@ -72,7 +91,11 @@
 
 <script>
 import { CopyDocument } from '@element-plus/icons-vue';
-import { generateMirrorConfig, MIRROR_CONFIG_TYPES } from '../utils/mirror-config';
+import {
+    generateMirrorConfig,
+    groupMirrorSources,
+    MIRROR_CONFIG_TYPES,
+} from '../utils/mirror-config';
 
 export default {
     name: 'MirrorConfigGenerator',
@@ -88,36 +111,53 @@ export default {
         };
     },
     computed: {
+        configGuide() {
+            return this.configTypes.find((item) => item.value === this.configType) || this.configTypes[0];
+        },
+        selectableSources() {
+            return this.sources.filter((item) => item.origin?.trim());
+        },
+        sourceGroups() {
+            return groupMirrorSources(this.selectableSources);
+        },
         selectedSources() {
             const selected = new Set(this.selectedIds);
-            return this.sources.filter((item) => selected.has(item.id));
+            return this.selectableSources.filter((item) => selected.has(item.id));
         },
-        missingOriginSources() {
-            return this.selectedSources.filter((item) => !item.origin?.trim());
+        unconfiguredSources() {
+            return this.sources.filter((item) => !item.origin?.trim());
         },
         generatedConfig() {
             return generateMirrorConfig(this.configType, this.selectedSources);
         },
+        emptySourceDescription() {
+            if (!this.sources.length) return '暂未配置可用站点';
+            return '暂未配置已标注适用源站的加速节点';
+        },
         emptyConfigHint() {
-            if (!this.selectedSources.length) return '// 请先选择镜像源';
-            if (this.configType !== 'docker' && this.missingOriginSources.length === this.selectedSources.length) {
-                return '// 已选站点均未配置源站地址';
-            }
+            if (!this.selectableSources.length) return `// ${this.emptySourceDescription}`;
+            if (!this.selectedSources.length) return '// 请先选择加速节点';
             return '// 暂无可生成的配置';
         },
     },
     watch: {
+        configType() {
+            this.syncSelection();
+        },
         sources: {
-            handler(value) {
-                const availableIds = new Set(value.map((item) => item.id));
-                this.selectedIds = this.selectedIds.filter((id) => availableIds.has(id));
+            handler() {
+                this.syncSelection();
             },
             immediate: true,
         },
     },
     methods: {
+        syncSelection() {
+            const availableIds = new Set(this.selectableSources.map((item) => item.id));
+            this.selectedIds = this.selectedIds.filter((id) => availableIds.has(id));
+        },
         selectAll() {
-            this.selectedIds = this.sources.map((item) => item.id);
+            this.selectedIds = this.selectableSources.map((item) => item.id);
         },
         clearSelection() {
             this.selectedIds = [];
@@ -157,7 +197,13 @@ h3 { margin-bottom: 6px; color: #17233d; font-size: 16px; }
 .source-toolbar { align-items: center; margin-top: 36px; padding-top: 28px; border-top: 1px solid #edf0f5; }
 .source-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .source-actions :deep(.el-button + .el-button) { margin-left: 0; }
-.source-grid { display: grid; margin-top: 18px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.source-groups { display: block; margin-top: 18px; }
+.source-group + .source-group { margin-top: 20px; padding-top: 20px; border-top: 1px solid #edf0f5; }
+.source-group-heading { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.source-group-heading span { flex: 0 0 auto; color: #7a8499; font-size: 12px; }
+.source-group-heading code { overflow: hidden; color: #344054; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.source-group-heading small { flex: 0 0 auto; margin-left: auto; color: #98a2b3; }
+.source-grid { display: grid; margin-top: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .source-grid :deep(.el-checkbox) { width: 100%; height: auto; min-height: 76px; margin-right: 0; padding: 14px 16px; align-items: flex-start; background: #f8faff; border-color: #e1e7f2; border-radius: 12px; }
 .source-grid :deep(.el-checkbox.is-bordered.is-checked) { background: #eef4ff; border-color: #165dff; }
 .source-grid :deep(.el-checkbox__label) { display: flex; min-width: 0; padding-left: 10px; flex-direction: column; }
@@ -169,6 +215,10 @@ h3 { margin-bottom: 6px; color: #17233d; font-size: 16px; }
 .config-result { margin-top: 28px; }
 .result-heading { align-items: center; margin-bottom: 12px; }
 .result-heading :deep(.el-button .el-icon) { margin-right: 6px; }
+.config-guide { display: grid; margin-bottom: 12px; padding: 14px 16px; background: #f8faff; border-radius: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.config-guide div { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
+.config-guide span { color: #7a8499; font-size: 12px; }
+.config-guide code { overflow-wrap: anywhere; color: #344054; font-size: 12px; }
 pre { min-height: 210px; max-height: 460px; margin: 0; padding: 24px; overflow: auto; color: #d8e4ff; background: #11182a; border-radius: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
 @media (max-width: 900px) { .source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) {
@@ -177,5 +227,6 @@ pre { min-height: 210px; max-height: 460px; margin: 0; padding: 24px; overflow: 
     .config-type { min-width: 0; }
     .source-actions { justify-content: flex-start; }
     .source-grid { grid-template-columns: 1fr; }
+    .config-guide { grid-template-columns: 1fr; }
 }
 </style>
