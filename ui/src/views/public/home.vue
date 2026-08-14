@@ -44,21 +44,21 @@
                     <div class="section-title">
                         <span>GET STARTED</span>
                         <h2>镜像加速使用说明</h2>
-                        <p>选择任意站点作为容器镜像代理源，也可以在下方直接生成完整配置。</p>
+                        <p>先确认镜像所属仓库，再选择适用源站一致的加速地址。拉取时只替换仓库域名，镜像路径和标签保持不变。</p>
                     </div>
 
                     <div class="source-table-wrap">
                         <table v-if="sources.length" class="source-table">
                             <thead>
                                 <tr>
-                                    <th>站点域名</th>
-                                    <th>源站兜底地址</th>
+                                    <th>适用源站</th>
+                                    <th>加速地址</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr v-for="source in sources" :key="source.id">
-                                    <td>{{ source.domain }}</td>
-                                    <td><code>{{ source.origin || '未配置源站地址' }}</code></td>
+                                    <td><code>{{ source.origin || '未标注' }}</code></td>
+                                    <td><code>{{ source.url }}</code></td>
                                 </tr>
                             </tbody>
                         </table>
@@ -68,15 +68,17 @@
                     <div class="examples">
                         <article>
                             <span class="step-number">01</span>
-                            <h3>拉取镜像</h3>
-                            <p>在镜像名称前添加加速站点域名。</p>
-                            <pre><code>docker pull {{ exampleDomain }}/library/nginx:latest</code></pre>
+                            <h3>选择匹配的加速节点</h3>
+                            <p>原镜像所属仓库必须与节点的适用源站一致，不同源站的节点不能混用。</p>
+                            <pre><code>适用源站：{{ pullExample.origin }}
+加速节点：{{ pullExample.mirror }}</code></pre>
                         </article>
                         <article>
                             <span class="step-number">02</span>
-                            <h3>配置镜像源</h3>
-                            <p>选择运行时和站点，复制生成结果到服务器。</p>
-                            <pre><code>sudo systemctl restart docker</code></pre>
+                            <h3>替换仓库域名</h3>
+                            <p>保留原镜像路径和标签，仅将原仓库域名替换为加速域名。</p>
+                            <pre><code>原镜像：{{ pullExample.original }}
+加速后：{{ pullExample.accelerated }}</code></pre>
                         </article>
                     </div>
                 </section>
@@ -93,18 +95,7 @@
 
         <footer class="public-footer">
             <div class="footer-inner">
-                <div class="footer-brand">
-                    <img
-                        class="brand-logo"
-                        src="//cdn.w7.cc/ued/logo/logo.png?imageView2/5/w/100/h/32/format/webp"
-                        alt="W7"
-                        width="100"
-                        height="32"
-                        loading="lazy"
-                    />
-                    <span>镜像加速服务</span>
-                </div>
-                <div class="footer-links">
+                <div class="footer-records">
                     <component
                         :is="icpBeianLink ? 'a' : 'span'"
                         v-if="pageSetting.icp_number"
@@ -119,14 +110,15 @@
                         target="_blank"
                         rel="noopener noreferrer"
                     >{{ pageSetting.police_number }}</component>
-                    <component
-                        :is="copyrightLink ? 'a' : 'span'"
-                        v-if="pageSetting.copyright"
-                        :href="copyrightLink || undefined"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                    >{{ pageSetting.copyright }}</component>
                 </div>
+                <component
+                    :is="copyrightLink ? 'a' : 'span'"
+                    v-if="pageSetting.copyright"
+                    class="footer-copyright"
+                    :href="copyrightLink || undefined"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >{{ pageSetting.copyright }}</component>
             </div>
         </footer>
     </div>
@@ -136,6 +128,7 @@
 import MirrorConfigGenerator from '../../components/mirror-config-generator.vue';
 import { getPublicSiteList, responseData } from '../../api/config';
 import { markdownToHtml } from '../../utils/markdown';
+import { isDockerHubOrigin } from '../../utils/mirror-config';
 
 const ICP_BEIAN_URL = 'https://beian.miit.gov.cn/';
 const POLICE_BEIAN_URL_PREFIX = 'https://www.beian.gov.cn/portal/registerSystemInfo?recordcode=';
@@ -159,6 +152,28 @@ const createPageSetting = () => ({
     markdown: '', icp_number: '', icp_link: '', police_number: '', police_link: '', copyright: '', copyright_link: '',
 });
 
+const withoutProtocol = (value = '') => value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+
+const buildPullExample = (source = {}) => {
+    const mirrorDomain = source.domain || 'mirror.example.com';
+    if (isDockerHubOrigin(source.origin)) {
+        return {
+            origin: source.origin,
+            mirror: source.url,
+            original: 'docker pull docker.io/library/nginx:latest',
+            accelerated: `docker pull ${mirrorDomain}/library/nginx:latest`,
+        };
+    }
+
+    const originLocation = withoutProtocol(source.origin) || 'registry.example.com';
+    return {
+        origin: source.origin || 'https://registry.example.com',
+        mirror: source.url || 'https://mirror.example.com',
+        original: `docker pull ${originLocation}/namespace/image:tag`,
+        accelerated: `docker pull ${mirrorDomain}/namespace/image:tag`,
+    };
+};
+
 export default {
     name: 'PublicHome',
     components: { MirrorConfigGenerator },
@@ -169,8 +184,11 @@ export default {
         customContentHtml() {
             return markdownToHtml(this.pageSetting.markdown);
         },
-        exampleDomain() {
-            return this.sources[0]?.domain || 'mirror.example.com';
+        pullExample() {
+            const exampleSource = this.sources.find((item) => isDockerHubOrigin(item.origin))
+                || this.sources.find((item) => item.origin?.trim())
+                || this.sources[0];
+            return buildPullExample(exampleSource);
         },
         icpBeianLink() {
             return this.pageSetting.icp_link ? safeHttpLink(this.pageSetting.icp_link) : ICP_BEIAN_URL;
@@ -231,8 +249,7 @@ export default {
 .public-header { position: absolute; z-index: 10; top: 0; right: 0; left: 0; color: #fff; background: linear-gradient(180deg, rgb(0 0 0 / 76%) 0%, rgb(0 0 0 / 0%) 100%); }
 .header-inner, .footer-inner { display: flex; width: min(1180px, calc(100% - 40px)); margin: 0 auto; align-items: center; justify-content: space-between; }
 .header-inner { height: 76px; }
-.brand, .footer-brand { display: flex; align-items: center; gap: 10px; color: inherit; font-size: 16px; font-weight: 700; }
-.brand { padding: 0; background: transparent; border: 0; cursor: pointer; font-family: inherit; }
+.brand { display: flex; padding: 0; align-items: center; gap: 10px; color: inherit; background: transparent; border: 0; cursor: pointer; font-family: inherit; font-size: 16px; font-weight: 700; }
 .brand-logo { display: block; width: 100px; height: 32px; object-fit: contain; }
 nav { display: flex; gap: 30px; }
 nav button { padding: 0; color: rgb(255 255 255 / 76%); background: transparent; border: 0; cursor: pointer; font: inherit; }
@@ -279,9 +296,11 @@ nav button:hover { color: #fff; }
 .markdown-content :deep(blockquote) { margin-left: 0; padding: 12px 18px; color: #667085; background: #f8faff; border-left: 4px solid #165dff; }
 .markdown-content :deep(a) { color: #165dff; }
 .public-footer { margin-top: 72px; padding: 32px 0; color: #9ba8c2; background: #0b1429; }
-.footer-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px 22px; }
-.footer-links a { color: inherit; }
-.footer-links a:hover { color: #fff; }
+.footer-inner { flex-wrap: wrap; gap: 12px 28px; }
+.footer-records { display: flex; flex-wrap: wrap; gap: 12px 22px; }
+.footer-records a, .footer-copyright { color: inherit; }
+.footer-records a:hover, .footer-copyright:hover { color: #fff; }
+.footer-copyright { margin-left: auto; text-align: right; }
 @media (max-width: 760px) {
     nav { display: none; }
     .hero { min-height: 620px; }
@@ -291,7 +310,6 @@ nav button:hover { color: #fff; }
     .source-table-wrap { overflow-x: auto; }
     .source-table { min-width: 680px; }
     .examples { grid-template-columns: 1fr; }
-    .footer-inner { align-items: flex-start; flex-direction: column; gap: 22px; }
-    .footer-links { justify-content: flex-start; }
+    .footer-inner { align-items: flex-start; }
 }
 </style>
