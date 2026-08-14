@@ -43,20 +43,11 @@
                     <el-form-item label="ICP备案号">
                         <el-input v-model.trim="form.icp_number" placeholder="例如：晋ICP备XXXXXXXX号" />
                     </el-form-item>
-                    <el-form-item label="ICP备案跳转链接" prop="icp_link">
-                        <el-input v-model.trim="form.icp_link" placeholder="填写后会覆盖默认值" />
-                    </el-form-item>
                     <el-form-item label="公安备案号">
                         <el-input v-model.trim="form.police_number" placeholder="例如：晋公网安备XXXXXXXX号" />
                     </el-form-item>
-                    <el-form-item label="公安备案跳转链接" prop="police_link">
-                        <el-input v-model.trim="form.police_link" placeholder="填写后会覆盖默认值" />
-                    </el-form-item>
                     <el-form-item label="版权信息">
                         <el-input v-model.trim="form.copyright" placeholder="例如：© 2026 W7" />
-                    </el-form-item>
-                    <el-form-item label="版权跳转链接" prop="copyright_link">
-                        <el-input v-model.trim="form.copyright_link" placeholder="https://example.com" />
                     </el-form-item>
                 </div>
             </section>

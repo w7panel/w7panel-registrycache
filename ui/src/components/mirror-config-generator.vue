@@ -22,7 +22,7 @@
         <div class="source-toolbar">
             <div>
                 <h3>选择加速节点</h3>
-                <span>节点已按适用源站分组，同一源站可以选择多个节点。</span>
+                <span>可以同时选择多个加速节点。</span>
             </div>
             <div class="source-actions">
                 <el-button :disabled="!selectableSources.length" @click="selectAll">全选</el-button>
@@ -30,27 +30,18 @@
             </div>
         </div>
 
-        <el-checkbox-group v-if="selectableSources.length" v-model="selectedIds" class="source-groups">
-            <section v-for="group in sourceGroups" :key="group.origin" class="source-group">
-                <div class="source-group-heading">
-                    <span>适用源站</span>
-                    <code>{{ group.origin }}</code>
-                    <small>{{ group.mirrors.length }} 个节点</small>
-                </div>
-                <div class="source-grid">
-                    <el-checkbox
-                        v-for="source in group.mirrors"
-                        :key="source.id"
-                        :value="source.id"
-                        :label="source.id"
-                        border
-                        class="source-option"
-                    >
-                        <span class="source-name">{{ source.domain }}</span>
-                        <span class="source-url">{{ source.url }}</span>
-                    </el-checkbox>
-                </div>
-            </section>
+        <el-checkbox-group v-if="selectableSources.length" v-model="selectedIds" class="source-grid">
+            <el-checkbox
+                v-for="source in selectableSources"
+                :key="source.id"
+                :value="source.id"
+                :label="source.id"
+                border
+                class="source-option"
+            >
+                <span class="source-name">{{ source.origin }}</span>
+                <span class="source-url">{{ source.domain }}</span>
+            </el-checkbox>
         </el-checkbox-group>
         <el-empty v-else :description="emptySourceDescription" :image-size="72" class="source-empty" />
         <el-alert
@@ -93,7 +84,6 @@
 import { CopyDocument } from '@element-plus/icons-vue';
 import {
     generateMirrorConfig,
-    groupMirrorSources,
     MIRROR_CONFIG_TYPES,
 } from '../utils/mirror-config';
 
@@ -116,9 +106,6 @@ export default {
         },
         selectableSources() {
             return this.sources.filter((item) => item.origin?.trim());
-        },
-        sourceGroups() {
-            return groupMirrorSources(this.selectableSources);
         },
         selectedSources() {
             const selected = new Set(this.selectedIds);
@@ -197,13 +184,7 @@ h3 { margin-bottom: 6px; color: #17233d; font-size: 16px; }
 .source-toolbar { align-items: center; margin-top: 36px; padding-top: 28px; border-top: 1px solid #edf0f5; }
 .source-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .source-actions :deep(.el-button + .el-button) { margin-left: 0; }
-.source-groups { display: block; margin-top: 18px; }
-.source-group + .source-group { margin-top: 20px; padding-top: 20px; border-top: 1px solid #edf0f5; }
-.source-group-heading { display: flex; min-width: 0; align-items: center; gap: 10px; }
-.source-group-heading span { flex: 0 0 auto; color: #7a8499; font-size: 12px; }
-.source-group-heading code { overflow: hidden; color: #344054; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.source-group-heading small { flex: 0 0 auto; margin-left: auto; color: #98a2b3; }
-.source-grid { display: grid; margin-top: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.source-grid { display: grid; margin-top: 18px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .source-grid :deep(.el-checkbox) { width: 100%; height: auto; min-height: 76px; margin-right: 0; padding: 14px 16px; align-items: flex-start; background: #f8faff; border-color: #e1e7f2; border-radius: 12px; }
 .source-grid :deep(.el-checkbox.is-bordered.is-checked) { background: #eef4ff; border-color: #165dff; }
 .source-grid :deep(.el-checkbox__label) { display: flex; min-width: 0; padding-left: 10px; flex-direction: column; }
