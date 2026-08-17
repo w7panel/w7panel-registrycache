@@ -95,7 +95,7 @@ export default {
     },
     data() {
         return {
-            configType: 'docker',
+            configType: 'k3s',
             configTypes: MIRROR_CONFIG_TYPES,
             selectedIds: [],
         };
@@ -179,8 +179,8 @@ export default {
 h2, h3, p { margin-top: 0; }
 h2 { margin-bottom: 10px; color: #17233d; font-size: 28px; }
 h3 { margin-bottom: 6px; color: #17233d; font-size: 16px; }
-.generator-description, .source-toolbar span, .result-heading span { margin-bottom: 0; color: #7a8499; line-height: 1.7; }
-.config-type { display: flex; min-width: 270px; flex-direction: column; gap: 8px; color: #4e5969; font-size: 13px; }
+.generator-description, .source-toolbar span, .result-heading span { margin-bottom: 0; color: #7a8499; font-size: 15px; line-height: 1.7; }
+.config-type { display: flex; min-width: 270px; flex-direction: column; gap: 8px; color: #4e5969; font-size: 14px; }
 .source-toolbar { align-items: center; margin-top: 36px; padding-top: 28px; border-top: 1px solid #edf0f5; }
 .source-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .source-actions :deep(.el-button + .el-button) { margin-left: 0; }
@@ -190,17 +190,17 @@ h3 { margin-bottom: 6px; color: #17233d; font-size: 16px; }
 .source-grid :deep(.el-checkbox__label) { display: flex; min-width: 0; padding-left: 10px; flex-direction: column; }
 .source-name, .source-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .source-name { color: #1d2939; font-weight: 600; }
-.source-url { margin-top: 7px; color: #7a8499; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+.source-url { margin-top: 7px; color: #7a8499; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 14px; }
 .source-empty { margin-top: 18px; padding: 16px 0; background: #f8faff; border-radius: 12px; }
 .source-warning { margin-top: 18px; }
 .config-result { margin-top: 28px; }
 .result-heading { align-items: center; margin-bottom: 12px; }
 .result-heading :deep(.el-button .el-icon) { margin-right: 6px; }
-.config-guide { display: grid; margin-bottom: 12px; padding: 14px 16px; background: #f8faff; border-radius: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.config-guide { display: grid; margin-bottom: 12px; padding: 14px 16px; background: #f8faff; border-radius: 10px; grid-template-columns: 1fr; gap: 12px; }
 .config-guide div { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
-.config-guide span { color: #7a8499; font-size: 12px; }
-.config-guide code { overflow-wrap: anywhere; color: #344054; font-size: 12px; }
-pre { min-height: 210px; max-height: 460px; margin: 0; padding: 24px; overflow: auto; color: #d8e4ff; background: #11182a; border-radius: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
+.config-guide span { color: #7a8499; font-size: 14px; }
+.config-guide code { overflow-wrap: anywhere; color: #344054; font-size: 14px; }
+pre { min-height: 210px; max-height: 460px; margin: 0; padding: 24px; overflow: auto; color: #d8e4ff; background: #11182a; border-radius: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
 @media (max-width: 900px) { .source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) {
     .generator-card { padding: 22px; border-radius: 16px; }
@@ -208,6 +208,5 @@ pre { min-height: 210px; max-height: 460px; margin: 0; padding: 24px; overflow: 
     .config-type { min-width: 0; }
     .source-actions { justify-content: flex-start; }
     .source-grid { grid-template-columns: 1fr; }
-    .config-guide { grid-template-columns: 1fr; }
 }
 </style>

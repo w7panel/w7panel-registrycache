@@ -28,7 +28,7 @@
                     id="public-page-markdown-editor"
                     v-model="form.markdown"
                     class="markdown-editor"
-                    :preview="true"
+                    :preview="false"
                     :toolbars-exclude="['github', 'save']"
                     placeholder="# 镜像加速服务\n\n在这里编写公开首页内容……"
                 />
@@ -117,7 +117,7 @@ export default {
             } finally {
                 this.loading = false;
                 await this.$nextTick();
-                this.$refs.markdownEditor?.togglePreviewOnly(true);
+                this.$refs.markdownEditor?.togglePreviewOnly(false);
             }
         },
         async submit() {
