@@ -26,14 +26,10 @@
                 <div class="hero-content">
                     <span class="hero-badge">CONTAINER MIRROR ACCELERATION</span>
                     <h1>更简单、更稳定地<br />获取容器镜像</h1>
-                    <p>快速生成 Docker、Podman、Containerd 和 Nerdctl 配置。</p>
+                    <p>快速生成 Docker、Podman、Containerd、Nerdctl 和 K3s 配置。</p>
                     <div class="hero-actions">
                         <button class="primary-action" type="button" @click="scrollToSection('generator')">生成配置</button>
                         <button class="secondary-action" type="button" @click="scrollToSection('guide')">查看使用说明</button>
-                    </div>
-                    <div class="hero-stat">
-                        <strong>{{ sources.length }}</strong>
-                        <span>个可用加速站点</span>
                     </div>
                 </div>
             </section>
@@ -95,6 +91,14 @@
 
         <footer class="public-footer">
             <div class="footer-inner">
+                <component
+                    :is="copyrightLink ? 'a' : 'span'"
+                    v-if="pageSetting.copyright"
+                    class="footer-copyright"
+                    :href="copyrightLink || undefined"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >{{ pageSetting.copyright }}</component>
                 <div class="footer-records">
                     <component
                         :is="icpBeianLink ? 'a' : 'span'"
@@ -111,14 +115,6 @@
                         rel="noopener noreferrer"
                     >{{ pageSetting.police_number }}</component>
                 </div>
-                <component
-                    :is="copyrightLink ? 'a' : 'span'"
-                    v-if="pageSetting.copyright"
-                    class="footer-copyright"
-                    :href="copyrightLink || undefined"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                >{{ pageSetting.copyright }}</component>
             </div>
         </footer>
     </div>
@@ -266,25 +262,22 @@ nav button:hover { color: #fff; }
 .hero-actions { display: flex; margin-top: 34px; gap: 12px; }
 .primary-action, .secondary-action { display: inline-flex; height: 46px; padding: 0 23px; align-items: center; justify-content: center; border: 0; border-radius: 9px; cursor: pointer; font: inherit; font-weight: 600; }
 .primary-action { color: #fff !important; background: #3478f6; box-shadow: 0 12px 26px rgb(27 91 230 / 34%); }
-.hero-stat { position: absolute; right: 5%; bottom: 0; display: flex; width: 210px; height: 110px; padding: 22px; flex-direction: column; justify-content: center; background: rgb(14 31 66 / 74%); border: 1px solid rgb(255 255 255 / 10%); border-radius: 18px 18px 0 0; backdrop-filter: blur(12px); }
-.hero-stat strong { font-size: 32px; }
-.hero-stat span { margin-top: 4px; color: rgb(225 234 255 / 60%); }
 .page-container { position: relative; z-index: 3; width: min(1180px, calc(100% - 40px)); margin: -54px auto 0; }
 .content-card { padding: 42px; background: #fff; border: 1px solid #e7eaf0; border-radius: 20px; box-shadow: 0 24px 60px rgb(33 56 97 / 8%); }
-.section-title span { color: #165dff; font-size: 12px; font-weight: 700; letter-spacing: .12em; }
+.section-title span { color: #165dff; font-size: 14px; font-weight: 700; letter-spacing: .12em; }
 .section-title h2 { margin: 10px 0; color: #17233d; font-size: 30px; }
-.section-title p { margin: 0; color: #7a8499; }
+.section-title p { margin: 0; color: #7a8499; font-size: 16px; line-height: 1.7; }
 .source-table-wrap { margin-top: 28px; overflow: hidden; border: 1px solid #e7eaf0; border-radius: 12px; }
 .source-table { width: 100%; border-collapse: collapse; }
 .source-table th, .source-table td { padding: 15px 18px; text-align: left; border-bottom: 1px solid #edf0f5; }
-.source-table th { color: #667085; background: #f8faff; font-size: 13px; font-weight: 600; }
+.source-table th { color: #667085; background: #f8faff; font-size: 14px; font-weight: 600; }
 .source-table tr:last-child td { border-bottom: 0; }
-.source-table code { color: #475467; font-size: 12px; }
+.source-table code { color: #475467; font-size: 14px; line-height: 1.6; }
 .examples { display: grid; margin-top: 24px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .examples article { position: relative; padding: 24px; overflow: hidden; background: #f8faff; border-radius: 14px; }
 .examples h3 { margin: 0 0 8px; font-size: 17px; }
-.examples p { margin: 0; color: #7a8499; }
-.examples pre { margin: 18px 0 0; padding: 14px 16px; overflow: auto; color: #d8e4ff; background: #11182a; border-radius: 8px; font-size: 12px; }
+.examples p { margin: 0; color: #7a8499; font-size: 15px; line-height: 1.7; }
+.examples pre { margin: 18px 0 0; padding: 14px 16px; overflow: auto; color: #d8e4ff; background: #11182a; border-radius: 8px; font-size: 14px; line-height: 1.7; }
 .step-number { position: absolute; top: 16px; right: 20px; color: #dbe6fb; font-size: 30px; font-weight: 800; }
 .generator-anchor { margin-top: 28px; scroll-margin-top: 24px; }
 .custom-content { margin-top: 28px; }
@@ -295,21 +288,20 @@ nav button:hover { color: #fff; }
 .markdown-content :deep(code) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .markdown-content :deep(blockquote) { margin-left: 0; padding: 12px 18px; color: #667085; background: #f8faff; border-left: 4px solid #165dff; }
 .markdown-content :deep(a) { color: #165dff; }
-.public-footer { margin-top: 72px; padding: 32px 0; color: #9ba8c2; background: #0b1429; }
-.footer-inner { flex-wrap: wrap; gap: 12px 28px; }
-.footer-records { display: flex; flex-wrap: wrap; gap: 12px 22px; }
+.public-footer { margin-top: 72px; padding: 32px 0; color: #9ba8c2; background: #0b1429; text-align: center; }
+.footer-inner { flex-direction: column; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.footer-records { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px; }
 .footer-records a, .footer-copyright { color: inherit; }
 .footer-records a:hover, .footer-copyright:hover { color: #fff; }
-.footer-copyright { margin-left: auto; text-align: right; }
+.footer-copyright { margin-left: 0; text-align: center; }
 @media (max-width: 760px) {
     nav { display: none; }
     .hero { min-height: 620px; }
     .hero-content { padding-top: 140px; }
-    .hero-stat { right: 20px; }
     .content-card { padding: 24px; border-radius: 16px; }
     .source-table-wrap { overflow-x: auto; }
     .source-table { min-width: 680px; }
     .examples { grid-template-columns: 1fr; }
-    .footer-inner { align-items: flex-start; }
+    .footer-inner { align-items: center; }
 }
 </style>

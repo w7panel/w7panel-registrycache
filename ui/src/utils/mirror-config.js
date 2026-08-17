@@ -1,5 +1,11 @@
 export const MIRROR_CONFIG_TYPES = [
     {
+        label: 'K3s registries.yaml',
+        value: 'k3s',
+        path: '保存到 /etc/rancher/k3s/registries.yaml',
+        apply: 'sudo systemctl restart k3s',
+    },
+    {
         label: 'Docker daemon.json',
         value: 'docker',
         path: '合并到 /etc/docker/daemon.json',
@@ -120,6 +126,28 @@ ${hosts}`;
     }).join('\n\n# ------------------------------\n\n');
 };
 
+const generateK3s = (sources) => {
+    const groups = new Map();
+    sources.forEach((source) => {
+        const namespace = registryNamespace(source.origin?.trim() || '');
+        if (!namespace) return;
+        if (!groups.has(namespace)) groups.set(namespace, []);
+        groups.get(namespace).push(source);
+    });
+    if (!groups.size) return '';
+
+    const registries = Array.from(groups, ([namespace, mirrors]) => {
+        const endpoints = mirrors
+            .map((item) => `      - ${JSON.stringify(trimSlash(item.url))}`)
+            .join('\n');
+        return `  ${JSON.stringify(namespace)}:
+    endpoint:
+${endpoints}`;
+    }).join('\n');
+    return `mirrors:
+${registries}`;
+};
+
 export const generateMirrorConfig = (type, sources) => {
     if (!sources.length) return '';
     const generators = {
@@ -127,6 +155,7 @@ export const generateMirrorConfig = (type, sources) => {
         podman: generatePodman,
         containerd: generateContainerd,
         nerdctl: generateNerdctl,
+        k3s: generateK3s,
     };
     return (generators[type] || generateDocker)(sources);
 };
