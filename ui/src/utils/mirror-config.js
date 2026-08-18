@@ -18,9 +18,15 @@ export const MIRROR_CONFIG_TYPES = [
         apply: '无需重启，后续 podman pull 自动生效',
     },
     {
-        label: 'Containerd config.toml',
+        label: 'Containerd config v2（1.5–1.7）',
         value: 'containerd',
-        path: '合并到 /etc/containerd/config.toml',
+        path: '合并 config_path，并按注释保存 /etc/containerd/certs.d/*/hosts.toml',
+        apply: 'sudo systemctl restart containerd',
+    },
+    {
+        label: 'Containerd config v3（2.x）',
+        value: 'containerd2',
+        path: '合并 config_path，并按注释保存 /etc/containerd/certs.d/*/hosts.toml',
         apply: 'sudo systemctl restart containerd',
     },
     {
@@ -33,14 +39,8 @@ export const MIRROR_CONFIG_TYPES = [
 
 const trimSlash = (value = '') => value.replace(/\/+$/, '');
 const withoutProtocol = (value = '') => trimSlash(value).replace(/^https?:\/\//i, '');
+const isHttpUrl = (value = '') => /^http:\/\//i.test(value.trim());
 const quoteToml = (value = '') => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-const quoteTomlArray = (values) => values.map((value) => `"${quoteToml(value)}"`).join(', ');
-const DOCKER_HUB_HOSTS = new Set([
-    'docker.io',
-    'index.docker.io',
-    'registry-1.docker.io',
-    'registry.hub.docker.com',
-]);
 
 export const registryHost = (originUrl = '') => {
     const value = trimSlash(originUrl.trim());
@@ -51,8 +51,6 @@ export const registryHost = (originUrl = '') => {
         return withoutProtocol(value).split('/')[0].toLowerCase();
     }
 };
-
-export const isDockerHubOrigin = (originUrl = '') => DOCKER_HUB_HOSTS.has(registryHost(originUrl));
 
 export const groupMirrorSources = (sources = []) => {
     const groups = new Map();
@@ -68,13 +66,13 @@ export const groupMirrorSources = (sources = []) => {
 const groupSourcesByOrigin = (sources) => {
     return groupMirrorSources(sources).map(({ origin: originUrl, mirrors }) => ({
         originUrl,
-        originLocation: isDockerHubOrigin(originUrl) ? 'docker.io' : withoutProtocol(originUrl),
+        originLocation: withoutProtocol(originUrl),
         mirrors,
     }));
 };
 
 const registryNamespace = (originUrl) => {
-    return isDockerHubOrigin(originUrl) ? 'docker.io' : registryHost(originUrl);
+    return registryHost(originUrl);
 };
 
 const generateDocker = (sources) => {
@@ -86,34 +84,21 @@ const generateDocker = (sources) => {
 const generatePodman = (sources) => {
     const groups = groupSourcesByOrigin(sources);
     if (!groups.length) return '';
-    const registries = groups.map(({ originLocation, mirrors }) => {
+    const registries = groups.map(({ originUrl, originLocation, mirrors }) => {
         const mirrorConfig = mirrors.map((item) => `[[registry.mirror]]
 location = "${quoteToml(withoutProtocol(item.url))}"
-insecure = false`).join('\n\n');
+insecure = ${isHttpUrl(item.url)}`).join('\n\n');
         return `[[registry]]
 prefix = "${quoteToml(originLocation)}"
 location = "${quoteToml(originLocation)}"
+insecure = ${isHttpUrl(originUrl)}
 
 ${mirrorConfig}`;
     }).join('\n\n');
     return registries;
 };
 
-const generateContainerd = (sources) => {
-    const groups = groupSourcesByOrigin(sources);
-    if (!groups.length) return '';
-    const registries = groups.map(({ originUrl, mirrors }) => {
-        const namespace = registryNamespace(originUrl);
-        const endpoints = quoteTomlArray(mirrors.map((item) => trimSlash(item.url)));
-        return `[plugins."io.containerd.grpc.v1.cri".registry.mirrors."${quoteToml(namespace)}"]
-  endpoint = [${endpoints}]`;
-    }).join('\n\n');
-    return `version = 2
-
-${registries}`;
-};
-
-const generateNerdctl = (sources) => {
+const generateHostsToml = (sources) => {
     const groups = groupSourcesByOrigin(sources);
     if (!groups.length) return '';
     return groups.map(({ originUrl, mirrors }) => {
@@ -126,21 +111,37 @@ ${hosts}`;
     }).join('\n\n# ------------------------------\n\n');
 };
 
+const generateContainerd = (sources, majorVersion) => {
+    const hostsConfig = generateHostsToml(sources);
+    if (!hostsConfig) return '';
+    const plugin = majorVersion >= 2
+        ? 'io.containerd.cri.v1.images'
+        : 'io.containerd.grpc.v1.cri';
+    return `# 1. 将以下片段合并到 /etc/containerd/config.toml
+[plugins."${plugin}".registry]
+  config_path = "/etc/containerd/certs.d"
+
+# 2. 将以下内容按文件注释分别保存
+${hostsConfig}`;
+};
+
+const generateNerdctl = (sources) => generateHostsToml(sources);
+
 const generateK3s = (sources) => {
     const groups = new Map();
     sources.forEach((source) => {
-        const originUrl = trimSlash(source.origin?.trim() || '');
-        if (!originUrl) return;
-        if (!groups.has(originUrl)) groups.set(originUrl, []);
-        groups.get(originUrl).push(source);
+        const namespace = registryNamespace(source.origin?.trim() || '');
+        if (!namespace) return;
+        if (!groups.has(namespace)) groups.set(namespace, []);
+        groups.get(namespace).push(source);
     });
     if (!groups.size) return '';
 
-    const registries = Array.from(groups, ([originUrl, mirrors]) => {
+    const registries = Array.from(groups, ([namespace, mirrors]) => {
         const endpoints = mirrors
             .map((item) => `      - ${JSON.stringify(trimSlash(item.url))}`)
             .join('\n');
-        return `  ${JSON.stringify(originUrl)}:
+        return `  ${JSON.stringify(namespace)}:
     endpoint:
 ${endpoints}`;
     }).join('\n');
@@ -153,7 +154,8 @@ export const generateMirrorConfig = (type, sources) => {
     const generators = {
         docker: generateDocker,
         podman: generatePodman,
-        containerd: generateContainerd,
+        containerd: (items) => generateContainerd(items, 1),
+        containerd2: (items) => generateContainerd(items, 2),
         nerdctl: generateNerdctl,
         k3s: generateK3s,
     };

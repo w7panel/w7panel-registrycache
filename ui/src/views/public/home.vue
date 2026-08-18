@@ -124,7 +124,6 @@
 import MirrorConfigGenerator from '../../components/mirror-config-generator.vue';
 import { getPublicSiteList, responseData } from '../../api/config';
 import { markdownToHtml } from '../../utils/markdown';
-import { isDockerHubOrigin } from '../../utils/mirror-config';
 
 const ICP_BEIAN_URL = 'https://beian.miit.gov.cn/';
 const POLICE_BEIAN_URL_PREFIX = 'https://www.beian.gov.cn/portal/registerSystemInfo?recordcode=';
@@ -153,14 +152,6 @@ const withoutProtocol = (value = '') => value.trim().replace(/^https?:\/\//i, ''
 
 const buildPullExample = (source = {}) => {
     const mirrorDomain = source.domain || 'mirror.example.com';
-    if (isDockerHubOrigin(source.origin)) {
-        return {
-            origin: source.origin,
-            mirror: source.url,
-            original: 'docker pull docker.io/library/nginx:latest',
-            accelerated: `docker pull ${mirrorDomain}/library/nginx:latest`,
-        };
-    }
 
     const originLocation = withoutProtocol(source.origin) || 'registry.example.com';
     return {
@@ -182,8 +173,7 @@ export default {
             return markdownToHtml(this.pageSetting.markdown);
         },
         pullExample() {
-            const exampleSource = this.sources.find((item) => isDockerHubOrigin(item.origin))
-                || this.sources.find((item) => item.origin?.trim())
+            const exampleSource = this.sources.find((item) => item.origin?.trim())
                 || this.sources[0];
             return buildPullExample(exampleSource);
         },
