@@ -128,6 +128,7 @@ import { isDockerHubOrigin } from '../../utils/mirror-config';
 
 const ICP_BEIAN_URL = 'https://beian.miit.gov.cn/';
 const POLICE_BEIAN_URL_PREFIX = 'https://www.beian.gov.cn/portal/registerSystemInfo?recordcode=';
+const DEFAULT_ORIGIN_URL = 'https://registry-1.docker.io';
 
 const safeHttpLink = (value) => {
     if (!value) return '';
@@ -222,7 +223,7 @@ export default {
             const sourceMap = new Map();
             Object.entries(data || {}).forEach(([group, setting]) => {
                 if (group === 'global') return;
-                const origin = setting?.origin_registry?.server_url || '';
+                const origin = setting?.origin_registry?.server_url?.trim() || DEFAULT_ORIGIN_URL;
                 group.split(',').map((item) => item.trim()).filter(Boolean).forEach((domain) => {
                     const protocol = domain === window.location.host ? window.location.protocol : 'https:';
                     sourceMap.set(domain, {
