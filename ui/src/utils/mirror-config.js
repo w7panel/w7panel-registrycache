@@ -129,18 +129,18 @@ ${hosts}`;
 const generateK3s = (sources) => {
     const groups = new Map();
     sources.forEach((source) => {
-        const namespace = registryNamespace(source.origin?.trim() || '');
-        if (!namespace) return;
-        if (!groups.has(namespace)) groups.set(namespace, []);
-        groups.get(namespace).push(source);
+        const originUrl = trimSlash(source.origin?.trim() || '');
+        if (!originUrl) return;
+        if (!groups.has(originUrl)) groups.set(originUrl, []);
+        groups.get(originUrl).push(source);
     });
     if (!groups.size) return '';
 
-    const registries = Array.from(groups, ([namespace, mirrors]) => {
+    const registries = Array.from(groups, ([originUrl, mirrors]) => {
         const endpoints = mirrors
             .map((item) => `      - ${JSON.stringify(trimSlash(item.url))}`)
             .join('\n');
-        return `  ${JSON.stringify(namespace)}:
+        return `  ${JSON.stringify(originUrl)}:
     endpoint:
 ${endpoints}`;
     }).join('\n');
