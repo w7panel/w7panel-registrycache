@@ -128,7 +128,7 @@ import { isDockerHubOrigin } from '../../utils/mirror-config';
 
 const ICP_BEIAN_URL = 'https://beian.miit.gov.cn/';
 const POLICE_BEIAN_URL_PREFIX = 'https://www.beian.gov.cn/portal/registerSystemInfo?recordcode=';
-const DEFAULT_ORIGIN_URL = 'https://registry-1.docker.io';
+const DEFAULT_ORIGIN_URL = 'https://docker.io';
 
 const safeHttpLink = (value) => {
     if (!value) return '';
