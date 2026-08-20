@@ -16,6 +16,12 @@ type Provider struct {
 func (p Provider) Register(httpServer *httpServer.Server) {
 	p.RegisterHttpRoutes(httpServer)
 
+	statusLifecycle := logic.NewRegistrySyncStatusLifecycle(logic.RegistrySyncStatusOptions{
+		DeleteOnComplete: true,
+	})
+	if err := statusLifecycle.RegisterEvents(); err != nil {
+		panic(err)
+	}
 	logic.Transfer{}.Loop()
 }
 

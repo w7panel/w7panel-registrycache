@@ -16,6 +16,7 @@ import (
 	"github.com/docker/distribution/manifest/schema2"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/panjf2000/ants/v2"
+	"github.com/we7coreteam/w7-rangine-go/v2/pkg/support/facade"
 )
 
 var transferMap sync.Map
@@ -216,9 +217,13 @@ func (l Transfer) transferImage(transferInfo TransferInfo) error {
 	return l.copyImage(sourceRegistryClient, cacheRegistryClient, sourceManifest, transferInfo)
 }
 
-func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest distribution.Manifest, transferInfo TransferInfo) error {
+func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest distribution.Manifest, transferInfo TransferInfo) (resultErr error) {
 	repoName := transferInfo.RepositoryName
 	tag := transferInfo.Reference
+	mediaType, manifestPayload, err := sourceManifest.Payload()
+	if err != nil {
+		return err
+	}
 	childManifests, blobs, err := l.collectManifestReferences(sourceRepo, repoName, tag, sourceManifest)
 	if err != nil {
 		return err
@@ -226,11 +231,26 @@ func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest
 
 	targetRepoName := repoName
 	targetRepoName = l.RebuildImageName(targetRepoName, transferInfo.CacheSetting.CacheRegistry.CacheNamespacePrefix)
+	event := newTransferLifecycleEvent(
+		transferInfo, targetRepo, repoName, targetRepoName, tag, manifestPayload, blobs,
+	)
+	facade.GetEvent().Publish(TransferLifecycleStarted, TransferLifecyclePayload{Event: event})
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		transferErr := resultErr
+		if transferErr == nil {
+			transferErr = errors.New("transfer did not complete")
+		}
+		facade.GetEvent().Publish(TransferLifecycleFailed, TransferLifecyclePayload{Event: event, Err: transferErr})
+	}()
 
 	slog.Info("transfer blobs", "repoName", repoName, "targetRepoName", targetRepoName, "tag", tag, "blobs", blobs)
 	sourceRepos := l.transferSourceClients(sourceRepo, transferInfo)
-	if err := l.copyBlobs(sourceRepos, targetRepo, repoName, targetRepoName, blobs, transferInfo); err != nil {
-		return fmt.Errorf("同步blobs失败: %v", err)
+	if err := l.copyBlobs(sourceRepos, targetRepo, repoName, targetRepoName, blobs, transferInfo, event); err != nil {
+		return fmt.Errorf("同步blobs失败: %w", err)
 	}
 
 	for _, item := range childManifests {
@@ -245,13 +265,15 @@ func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest
 		}
 	}
 
-	mediaType, payload, err := sourceManifest.Payload()
+	_, err = targetRepo.PushManifest(targetRepoName, tag, mediaType, manifestPayload)
+	slog.Info("transfer push platform manifest", "repoName", targetRepoName, "tag", tag, "err", err)
 	if err != nil {
 		return err
 	}
-	_, err = targetRepo.PushManifest(targetRepoName, tag, mediaType, payload)
-	slog.Info("transfer push platform manifest", "repoName", targetRepoName, "tag", tag, "err", err)
-	return err
+
+	facade.GetEvent().Publish(TransferLifecycleCompleted, TransferLifecyclePayload{Event: event})
+	completed = true
+	return nil
 }
 
 func (l Transfer) collectManifestReferences(sourceRepo client.Client, repoName, tag string, manifest distribution.Manifest) ([]childManifestRef, []distribution.Descriptor, error) {
@@ -307,7 +329,7 @@ func (l Transfer) collectManifestReferences(sourceRepo client.Client, repoName, 
 	return collect(manifest)
 }
 
-func (l Transfer) copyBlobs(sourceRepos []TransferSourceClient, targetRepo client.Client, sourceRepoName string, targetRepoName string, blobs []distribution.Descriptor, transferInfo TransferInfo) error {
+func (l Transfer) copyBlobs(sourceRepos []TransferSourceClient, targetRepo client.Client, sourceRepoName string, targetRepoName string, blobs []distribution.Descriptor, transferInfo TransferInfo, event TransferLifecycleEvent) error {
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(blobs))
 	sem := make(chan struct{}, min(10, len(blobs))) // 限制blob并发数
@@ -324,14 +346,18 @@ func (l Transfer) copyBlobs(sourceRepos []TransferSourceClient, targetRepo clien
 
 			if l.targetBlobReadable(targetRepo, targetRepoName, blob) {
 				slog.Info("transfer blob skipped with readable cache", "repoName", sourceRepoName, "targetRepoName", targetRepoName, "blob", blob.Digest.String(), "blobSize", blob.Size)
+				facade.GetEvent().Publish(TransferLifecycleBlobCompleted, TransferLifecyclePayload{Event: event, Blob: blob, Skipped: true})
 				return
 			}
 
 			err := l.copyBlobWithFallback(sourceRepos, targetRepo, sourceRepoName, targetRepoName, blob, blobIndex, transferInfo)
 			if err != nil {
 				slog.Error("transfer download blob error", "repoName", sourceRepoName, "blob", blob.Digest.String(), "err", err)
+				facade.GetEvent().Publish(TransferLifecycleBlobFailed, TransferLifecyclePayload{Event: event, Blob: blob, Err: err})
 				errChan <- err
+				return
 			}
+			facade.GetEvent().Publish(TransferLifecycleBlobCompleted, TransferLifecyclePayload{Event: event, Blob: blob})
 		}(blobIndex, blob)
 	}
 
