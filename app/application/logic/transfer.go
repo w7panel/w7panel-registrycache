@@ -528,7 +528,7 @@ func (l Transfer) Loop() {
 				err := transferPool.Invoke(transferInfo)
 				if err != nil {
 					slog.Error("transferPool Invoke", "err", err, "transferInfo", transferInfo)
-					return
+					transferChan <- transferInfo
 				}
 			}
 		}

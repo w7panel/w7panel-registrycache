@@ -57,6 +57,10 @@ type Setting struct {
 	logic
 }
 
+func storageSettingDir() string {
+	return filepath.Dir(facade.GetConfig().GetString("database.default.db_name"))
+}
+
 func (l Setting) SetStorageCacheSetting(host string, cacheSetting RegistryCacheSetting) error {
 	if cacheSetting.RepositoryCacheRules != nil {
 		sort.Slice(cacheSetting.RepositoryCacheRules, func(i, j int) bool {
@@ -78,7 +82,7 @@ func (l Setting) SetStorageCacheSetting(host string, cacheSetting RegistryCacheS
 		return err
 	}
 
-	settingSaveDir := filepath.Dir(facade.GetConfig().GetString("database.default.db_name"))
+	settingSaveDir := storageSettingDir()
 	err = os.MkdirAll(settingSaveDir, 0755)
 	settingSavePath := filepath.Join(settingSaveDir, host+settingFileSuffix)
 	err = os.WriteFile(settingSavePath, settingContent, 0644)
@@ -113,7 +117,7 @@ func (l Setting) GetStorageCacheSetting(host string) *RegistryCacheSetting {
 	cacheSetting := &RegistryCacheSetting{}
 	val, exists := defaultStorageSettingMap.Load(host)
 	if !exists {
-		settingSaveDir := filepath.Dir(facade.GetConfig().GetString("database.default.db_name"))
+		settingSaveDir := storageSettingDir()
 		settingSavePath := filepath.Join(settingSaveDir, host+settingFileSuffix)
 		if _, err := os.Stat(settingSavePath); os.IsNotExist(err) {
 			return nil
@@ -209,7 +213,7 @@ func cacheRepositoryMode(extra map[string]interface{}) string {
 }
 
 func (l Setting) DelStorageCacheSetting(host string) {
-	settingSaveDir := filepath.Dir(facade.GetConfig().GetString("database.default.db_name"))
+	settingSaveDir := storageSettingDir()
 	settingSavePath := filepath.Join(settingSaveDir, host+settingFileSuffix)
 	os.Remove(settingSavePath)
 
@@ -217,7 +221,7 @@ func (l Setting) DelStorageCacheSetting(host string) {
 }
 
 func (l Setting) StorageCacheList() (map[string]*RegistryCacheSetting, error) {
-	settingSaveDir := filepath.Dir(facade.GetConfig().GetString("database.default.db_name"))
+	settingSaveDir := storageSettingDir()
 
 	entries, err := os.ReadDir(settingSaveDir)
 	if err != nil {

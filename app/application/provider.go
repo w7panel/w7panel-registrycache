@@ -14,18 +14,15 @@ type Provider struct {
 }
 
 func (p Provider) Register(httpServer *httpServer.Server) {
-	p.RegisterHttpRoutes(httpServer)
-
-	statusLifecycle := logic.NewRegistrySyncStatusLifecycle(logic.RegistrySyncStatusOptions{
-		DeleteOnComplete: true,
-	})
+	statusLifecycle := logic.NewRegistrySyncStatusLifecycle()
 	if err := statusLifecycle.RegisterEvents(); err != nil {
 		panic(err)
 	}
+	p.RegisterHttpRoutes(httpServer, statusLifecycle)
 	logic.Transfer{}.Loop()
 }
 
-func (p Provider) RegisterHttpRoutes(server *httpServer.Server) {
+func (p Provider) RegisterHttpRoutes(server *httpServer.Server, statusLifecycle *logic.RegistrySyncStatusLifecycle) {
 	server.RegisterRouters(func(engine *gin.Engine) {
 		engine.Any("/health", func(context *gin.Context) {
 			context.Status(http.StatusOK)
@@ -37,6 +34,7 @@ func (p Provider) RegisterHttpRoutes(server *httpServer.Server) {
 		engine.Any("/api/setting/list", middleware.Cors{}.Process, middleware.Auth{}.Process, controller.Setting{}.List)
 		engine.Any("/api/setting/del", middleware.Cors{}.Process, middleware.Auth{}.Process, controller.Setting{}.Del)
 		engine.Any("/api/k8s/proxy/*path", middleware.Cors{}.Process, middleware.Auth{}.Process, controller.K8s{}.Proxy)
+		engine.Any("/api/sync-status/list", middleware.Cors{}.Process, controller.RegistrySyncStatus{Lifecycle: statusLifecycle}.List)
 
 		engine.Any("/oauth/auth-proxy", controller.AuthProxy{}.Handler)
 		engine.Any("/v2/*path", controller.Repository{}.Handler)

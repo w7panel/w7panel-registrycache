@@ -1,58 +1,41 @@
 package logic
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/docker/distribution"
-	"github.com/opencontainers/go-digest"
-	"github.com/opencontainers/image-spec/specs-go"
-	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/we7coreteam/w7-rangine-go/v2/pkg/support/facade"
 )
 
+const RegistrySyncStatusLifecycleName = "registry-sync-status"
+
 const (
-	RegistrySyncStatusLifecycleName = "registry-sync-status"
-	defaultSyncStatusNamespace      = "w7-sync"
-	syncStatusArtifactType          = "application/vnd.w7.registry-sync-status.v1+json"
+	syncStatusRetention       = 24 * time.Hour
+	syncStatusPersistInterval = 10 * time.Second
+	syncStatusCleanupInterval = 10 * time.Minute
 )
 
-// RegistrySyncStatusLocation returns the repository and tag used by the
-// optional registry status artifact. A consumer on the cache side can use the
-// normal Registry API to read this tag while a transfer is in progress.
-func RegistrySyncStatusLocation(namespace, targetRepository, reference string) (string, string) {
-	namespace = strings.Trim(namespace, "/")
-	if namespace == "" {
-		namespace = defaultSyncStatusNamespace
-	}
-	sum := sha256.Sum256([]byte(targetRepository + "\x00" + reference))
-	return namespace + "/" + targetRepository, "sync-" + hex.EncodeToString(sum[:])
-}
-
-type RegistrySyncStatusOptions struct {
-	Namespace        string
-	DeleteOnComplete bool
-}
-
 type RegistrySyncStatusLifecycle struct {
-	options RegistrySyncStatusOptions
-	mu      sync.Mutex
-	tasks   map[string]*registrySyncStatusTask
+	mu         sync.Mutex
+	persistMu  sync.Mutex
+	statusPath string
+	tasks      map[string]*registrySyncStatusTask
+	dirty      bool
+	version    uint64
 }
 
 type registrySyncStatusTask struct {
-	mu                     sync.Mutex
-	status                 RegistrySyncStatus
-	lastStatusManifestDgst string
+	mu     sync.Mutex
+	status RegistrySyncStatus
 }
 
 type RegistrySyncStatusBlob struct {
@@ -73,12 +56,20 @@ type RegistrySyncStatus struct {
 	UpdatedAt            time.Time                `json:"updated_at"`
 }
 
-func NewRegistrySyncStatusLifecycle(options RegistrySyncStatusOptions) *RegistrySyncStatusLifecycle {
-	options.Namespace = strings.Trim(options.Namespace, "/")
-	if options.Namespace == "" {
-		options.Namespace = defaultSyncStatusNamespace
+func NewRegistrySyncStatusLifecycle() *RegistrySyncStatusLifecycle {
+	lifecycle := &RegistrySyncStatusLifecycle{
+		statusPath: filepath.Join(storageSettingDir(), "registry-sync-status.json"),
+		tasks:      make(map[string]*registrySyncStatusTask),
 	}
-	return &RegistrySyncStatusLifecycle{options: options, tasks: make(map[string]*registrySyncStatusTask)}
+	if err := lifecycle.load(); err != nil {
+		slog.Warn("加载镜像同步状态失败", "err", err)
+	}
+	if err := lifecycle.cleanupAndPersist(); err != nil {
+		slog.Warn("清理镜像同步状态失败", "err", err)
+	}
+	go lifecycle.cleanupLoop()
+	go lifecycle.persistLoop()
+	return lifecycle
 }
 
 // RegisterEvents connects this optional feature to rangine's event bus.
@@ -113,7 +104,7 @@ func (l *RegistrySyncStatusLifecycle) RegisterEvents() error {
 }
 
 func (l *RegistrySyncStatusLifecycle) Started(_ context.Context, event TransferLifecycleEvent) error {
-	task := &registrySyncStatusTask{status: RegistrySyncStatus{
+	status := RegistrySyncStatus{
 		Repository:           event.TargetRepository,
 		Reference:            event.Reference,
 		SourceManifestDigest: event.SourceManifestDigest,
@@ -121,17 +112,24 @@ func (l *RegistrySyncStatusLifecycle) Started(_ context.Context, event TransferL
 		ExpectedBlobs:        make([]RegistrySyncStatusBlob, 0, len(event.Blobs)),
 		CompletedBlobs:       make([]string, 0, len(event.Blobs)),
 		FailedBlobs:          make(map[string]string),
-	}}
+		UpdatedAt:            time.Now().UTC(),
+	}
 	for _, blob := range event.Blobs {
-		task.status.ExpectedBlobs = append(task.status.ExpectedBlobs, RegistrySyncStatusBlob{
+		status.ExpectedBlobs = append(status.ExpectedBlobs, RegistrySyncStatusBlob{
 			Digest: blob.Digest.String(), Size: blob.Size, MediaType: blob.MediaType,
 		})
 	}
 
 	l.mu.Lock()
-	l.tasks[l.taskKey(event)] = task
+	key := l.taskKey(event)
+	if l.tasks == nil {
+		l.tasks = make(map[string]*registrySyncStatusTask)
+	}
+	l.tasks[key] = &registrySyncStatusTask{status: status}
+	l.dirty = true
+	l.version++
 	l.mu.Unlock()
-	return l.publish(event, task)
+	return l.persistNow()
 }
 
 func (l *RegistrySyncStatusLifecycle) BlobCompleted(_ context.Context, event TransferLifecycleEvent, blob distribution.Descriptor, _ bool) error {
@@ -140,15 +138,16 @@ func (l *RegistrySyncStatusLifecycle) BlobCompleted(_ context.Context, event Tra
 		return errors.New("sync status task not found")
 	}
 	task.mu.Lock()
-	defer task.mu.Unlock()
-
 	digestString := blob.Digest.String()
 	if !containsString(task.status.CompletedBlobs, digestString) {
 		task.status.CompletedBlobs = append(task.status.CompletedBlobs, digestString)
 		sort.Strings(task.status.CompletedBlobs)
 	}
 	delete(task.status.FailedBlobs, digestString)
-	return l.publishLocked(event, task)
+	task.status.UpdatedAt = time.Now().UTC()
+	task.mu.Unlock()
+	l.markDirty()
+	return nil
 }
 
 func (l *RegistrySyncStatusLifecycle) BlobFailed(_ context.Context, event TransferLifecycleEvent, blob distribution.Descriptor, transferErr error) error {
@@ -157,106 +156,222 @@ func (l *RegistrySyncStatusLifecycle) BlobFailed(_ context.Context, event Transf
 		return errors.New("sync status task not found")
 	}
 	task.mu.Lock()
-	defer task.mu.Unlock()
 	task.status.FailedBlobs[blob.Digest.String()] = transferErr.Error()
-	return l.publishLocked(event, task)
+	task.status.UpdatedAt = time.Now().UTC()
+	task.mu.Unlock()
+	l.markDirty()
+	return nil
 }
 
 func (l *RegistrySyncStatusLifecycle) Completed(_ context.Context, event TransferLifecycleEvent) error {
-	task := l.removeTask(event)
-	if task == nil {
+	key := l.taskKey(event)
+	l.mu.Lock()
+	if _, ok := l.tasks[key]; !ok {
+		l.mu.Unlock()
 		return nil
 	}
-	task.mu.Lock()
-	defer task.mu.Unlock()
-	task.status.Status = "completed"
-	task.status.Error = ""
-	if err := l.publishLocked(event, task); err != nil {
-		return err
-	}
-	if !l.options.DeleteOnComplete {
-		return nil
-	}
-	statusRepository, _ := RegistrySyncStatusLocation(l.options.Namespace, event.TargetRepository, event.Reference)
-	return event.TargetClient.DeleteManifest(statusRepository, task.lastStatusManifestDgst)
+	delete(l.tasks, key)
+	l.version++
+	l.dirty = true
+	l.mu.Unlock()
+	return l.persistNow()
 }
 
 func (l *RegistrySyncStatusLifecycle) Failed(_ context.Context, event TransferLifecycleEvent, transferErr error) error {
-	task := l.removeTask(event)
+	task := l.task(event)
 	if task == nil {
 		return nil
 	}
 	task.mu.Lock()
-	defer task.mu.Unlock()
 	task.status.Status = "failed"
 	task.status.Error = transferErr.Error()
-	return l.publishLocked(event, task)
-}
-
-func (l *RegistrySyncStatusLifecycle) publish(event TransferLifecycleEvent, task *registrySyncStatusTask) error {
-	task.mu.Lock()
-	defer task.mu.Unlock()
-	return l.publishLocked(event, task)
-}
-
-func (l *RegistrySyncStatusLifecycle) publishLocked(event TransferLifecycleEvent, task *registrySyncStatusTask) error {
 	task.status.UpdatedAt = time.Now().UTC()
-	statusPayload, err := json.Marshal(task.status)
+	task.mu.Unlock()
+	l.markDirty()
+	return l.persistNow()
+}
+
+// ListStatuses returns a snapshot of active and failed tasks for a cache host.
+func (l *RegistrySyncStatusLifecycle) ListStatuses(host string) []RegistrySyncStatus {
+	_ = l.cleanupAndPersist()
+	l.mu.Lock()
+	tasks := make([]*registrySyncStatusTask, 0, len(l.tasks))
+	for key, task := range l.tasks {
+		if host == "" || strings.HasPrefix(key, host+"\x00") {
+			tasks = append(tasks, task)
+		}
+	}
+	l.mu.Unlock()
+
+	statuses := make([]RegistrySyncStatus, 0, len(tasks))
+	for _, task := range tasks {
+		task.mu.Lock()
+		status := copySyncStatus(task.status)
+		task.mu.Unlock()
+		statuses = append(statuses, status)
+	}
+	sort.Slice(statuses, func(i, j int) bool {
+		if statuses[i].Repository == statuses[j].Repository {
+			return statuses[i].Reference < statuses[j].Reference
+		}
+		return statuses[i].Repository < statuses[j].Repository
+	})
+	return statuses
+}
+
+func (l *RegistrySyncStatusLifecycle) load() error {
+	if l.tasks == nil {
+		l.tasks = make(map[string]*registrySyncStatusTask)
+	}
+	content, err := os.ReadFile(l.statusPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	statusDigest := digest.FromBytes(statusPayload)
-	statusRepository, statusTag := RegistrySyncStatusLocation(l.options.Namespace, event.TargetRepository, event.Reference)
-	if err := event.TargetClient.PushBlob(statusRepository, statusDigest.String(), int64(len(statusPayload)), bytes.NewReader(statusPayload)); err != nil {
-		return fmt.Errorf("push sync status blob: %w", err)
-	}
-
-	manifest := v1.Manifest{
-		Versioned:    specs.Versioned{SchemaVersion: 2},
-		MediaType:    v1.MediaTypeImageManifest,
-		ArtifactType: syncStatusArtifactType,
-		Config: v1.Descriptor{
-			// Use the standard OCI config media type for compatibility with
-			// registries that validate descriptor media types strictly.
-			MediaType: v1.MediaTypeImageConfig,
-			Digest:    statusDigest,
-			Size:      int64(len(statusPayload)),
-		},
-		Layers: []v1.Descriptor{},
-	}
-	manifestPayload, err := json.Marshal(manifest)
-	if err != nil {
+	var records map[string]RegistrySyncStatus
+	if err := json.Unmarshal(content, &records); err != nil {
 		return err
 	}
-	manifestDigest, err := event.TargetClient.PushManifest(statusRepository, statusTag, v1.MediaTypeImageManifest, manifestPayload)
-	if err != nil {
-		return fmt.Errorf("push sync status manifest: %w", err)
-	}
-	if manifestDigest == "" {
-		manifestDigest = digest.FromBytes(manifestPayload).String()
-	}
-
-	oldManifestDigest := task.lastStatusManifestDgst
-	task.lastStatusManifestDgst = manifestDigest
-	if oldManifestDigest != "" && oldManifestDigest != manifestDigest {
-		_ = event.TargetClient.DeleteManifest(statusRepository, oldManifestDigest)
+	for key, status := range records {
+		if status.Status != "syncing" && status.Status != "failed" {
+			continue
+		}
+		l.tasks[key] = &registrySyncStatusTask{status: status}
 	}
 	return nil
+}
+
+func (l *RegistrySyncStatusLifecycle) persistNow() error {
+	l.persistMu.Lock()
+	defer l.persistMu.Unlock()
+
+	l.mu.Lock()
+	version := l.version
+	statuses := make(map[string]RegistrySyncStatus, len(l.tasks))
+	for key, task := range l.tasks {
+		task.mu.Lock()
+		statuses[key] = copySyncStatus(task.status)
+		task.mu.Unlock()
+	}
+	l.mu.Unlock()
+
+	content, err := json.MarshalIndent(statuses, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(l.statusPath), 0755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(l.statusPath), ".registry-sync-status-*.sync")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, l.statusPath); err != nil {
+		return err
+	}
+	l.mu.Lock()
+	if l.version == version {
+		l.dirty = false
+	}
+	l.mu.Unlock()
+	return nil
+}
+
+func (l *RegistrySyncStatusLifecycle) markDirty() {
+	l.mu.Lock()
+	l.dirty = true
+	l.version++
+	l.mu.Unlock()
+}
+
+func copySyncStatus(status RegistrySyncStatus) RegistrySyncStatus {
+	status.ExpectedBlobs = append([]RegistrySyncStatusBlob(nil), status.ExpectedBlobs...)
+	status.CompletedBlobs = append([]string(nil), status.CompletedBlobs...)
+	status.FailedBlobs = make(map[string]string, len(status.FailedBlobs))
+	for digest, message := range status.FailedBlobs {
+		status.FailedBlobs[digest] = message
+	}
+	return status
+}
+
+func (l *RegistrySyncStatusLifecycle) cleanupAndPersist() error {
+	now := time.Now().UTC()
+	changed := l.cleanup(now)
+	if !changed {
+		return nil
+	}
+	l.markDirty()
+	return l.persistNow()
+}
+func (l *RegistrySyncStatusLifecycle) cleanup(now time.Time) bool {
+	changed := false
+	l.mu.Lock()
+	for key, task := range l.tasks {
+		task.mu.Lock()
+		status := task.status
+		task.mu.Unlock()
+		if status.UpdatedAt.IsZero() || now.Sub(status.UpdatedAt) < syncStatusRetention {
+			continue
+		}
+		if current, ok := l.tasks[key]; ok && current == task {
+			delete(l.tasks, key)
+			l.version++
+			changed = true
+		}
+	}
+	l.mu.Unlock()
+	return changed
+}
+
+func (l *RegistrySyncStatusLifecycle) cleanupLoop() {
+	ticker := time.NewTicker(syncStatusCleanupInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := l.cleanupAndPersist(); err != nil {
+			slog.Warn("定时清理镜像同步状态失败", "err", err)
+		}
+	}
+}
+
+func (l *RegistrySyncStatusLifecycle) persistLoop() {
+	ticker := time.NewTicker(syncStatusPersistInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		l.mu.Lock()
+		dirty := l.dirty
+		l.mu.Unlock()
+		if !dirty {
+			continue
+		}
+		if err := l.persistNow(); err != nil {
+			slog.Warn("定时保存镜像同步状态失败", "err", err)
+		}
+	}
 }
 
 func (l *RegistrySyncStatusLifecycle) task(event TransferLifecycleEvent) *registrySyncStatusTask {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.tasks[l.taskKey(event)]
-}
-
-func (l *RegistrySyncStatusLifecycle) removeTask(event TransferLifecycleEvent) *registrySyncStatusTask {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	key := l.taskKey(event)
-	task := l.tasks[key]
-	delete(l.tasks, key)
-	return task
 }
 
 func (l *RegistrySyncStatusLifecycle) taskKey(event TransferLifecycleEvent) string {

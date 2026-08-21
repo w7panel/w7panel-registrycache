@@ -15,6 +15,12 @@ export default {
             show: false,
             data: {},
         });
+        const syncStatus = ref({
+            show: false,
+            loading: false,
+            host: '',
+            list: [],
+        });
         const refCreateSite = ref(null);
 
         const getList = () => {
@@ -180,6 +186,24 @@ export default {
             console.log('domainCert', data);
         };
 
+        const openSyncStatus = async (row) => {
+            syncStatus.value = { show: true, loading: true, host: row.host, list: [] };
+            try {
+                const res = await axios.get('/api/sync-status/list', { params: { host: row.host } });
+                syncStatus.value.list = res?.data?.data?.list || [];
+            } catch (e) {
+                syncStatus.value.list = [];
+            } finally {
+                syncStatus.value.loading = false;
+            }
+        };
+
+        const statusProgress = (item) => {
+            const total = item?.expected_blobs?.length || 0;
+            const completed = item?.completed_blobs?.length || 0;
+            return total > 0 ? Math.min(100, Math.floor(completed * 100 / total)) : 0;
+        };
+
         onMounted(() => {
             getList();
         });
@@ -208,10 +232,11 @@ export default {
                 />
                 <el-table-column
                     label="操作"
-                    width="300px"
+                    width="390px"
                     v-slots={{
                         default: (scope) => (<>
                             <span class="c-blue cursor" onClick={() => { toEdit(scope.row); }}>修改</span>
+                            <span class="c-blue cursor ml-16" onClick={() => { openSyncStatus(scope.row); }}>查看同步状态</span>
                             <span class="c-blue cursor ml-16" onClick={() => { toHttpsConfig(scope.row); }}>https配置</span>
                             <el-popconfirm
                                 title="确定要删除吗？"
@@ -257,6 +282,46 @@ export default {
                     ref={refCreateSite}
                     data={form.value.data}
                 />
+            </el-dialog>
+            <el-dialog
+                modelValue={syncStatus.value.show}
+                onUpdate:modelValue={e => { syncStatus.value.show = e; }}
+                title={`同步状态：${syncStatus.value.host}`}
+                width="1080"
+            >
+                <div v-loading={syncStatus.value.loading} style="min-height: 120px;">
+                    {syncStatus.value.list.length === 0 && !syncStatus.value.loading ? (
+                        <el-empty description="当前没有未完成或失败的同步任务" />
+                    ) : (
+                        <el-table data={syncStatus.value.list} style={{ width: '100%' }} class="table-header">
+                            <el-table-column prop="repository" label="目标仓库" min-width="220" />
+                            <el-table-column prop="reference" label="镜像版本" width="180" />
+                            <el-table-column label="状态" width="130">
+                                {{ default: (scope) => (
+                                    <el-tag type={scope.row.status === 'failed' ? 'danger' : 'primary'}>
+                                        {scope.row.status === 'failed' ? '同步失败' : '同步中'}
+                                    </el-tag>
+                                ) }}
+                            </el-table-column>
+                            <el-table-column label="进度" min-width="280">
+                                {{ default: (scope) => {
+                                    const completed = scope.row.completed_blobs?.length || 0;
+                                    const total = scope.row.expected_blobs?.length || 0;
+                                    return <div class="sync-progress-cell" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        <el-progress percentage={statusProgress(scope.row)} status={scope.row.status === 'failed' ? 'exception' : undefined} />
+                                        <span>{completed}/{total}</span>
+                                    </div>;
+                                } }}
+                            </el-table-column>
+                            <el-table-column label="失败信息" min-width="240">
+                                {{ default: (scope) => scope.row.error || Object.values(scope.row.failed_blobs || {}).join('; ') || '-' }}
+                            </el-table-column>
+                            <el-table-column label="更新时间" width="190">
+                                {{ default: (scope) => scope.row.updated_at ? new Date(scope.row.updated_at).toLocaleString() : '-' }}
+                            </el-table-column>
+                        </el-table>
+                    )}
+                </div>
             </el-dialog>
         </div>);
     }
