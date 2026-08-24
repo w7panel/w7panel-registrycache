@@ -1,4 +1,4 @@
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import axios from 'axios';
 import { Plus, WarningFilled } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
@@ -21,6 +21,8 @@ export default {
             host: '',
             list: [],
         });
+        let syncStatusTimer = null;
+        let syncStatusAbortController = null;
         const refCreateSite = ref(null);
 
         const getList = () => {
@@ -186,16 +188,54 @@ export default {
             console.log('domainCert', data);
         };
 
-        const openSyncStatus = async (row) => {
-            syncStatus.value = { show: true, loading: true, host: row.host, list: [] };
-            try {
-                const res = await axios.get('/api/sync-status/list', { params: { host: row.host } });
-                syncStatus.value.list = res?.data?.data?.list || [];
-            } catch (e) {
-                syncStatus.value.list = [];
-            } finally {
-                syncStatus.value.loading = false;
+        const stopSyncStatusPolling = () => {
+            if (syncStatusTimer !== null) {
+                window.clearInterval(syncStatusTimer);
+                syncStatusTimer = null;
             }
+            if (syncStatusAbortController !== null) {
+                syncStatusAbortController.abort();
+                syncStatusAbortController = null;
+            }
+        };
+
+        const loadSyncStatus = async (host, showLoading = false) => {
+            if (syncStatusAbortController !== null) return;
+            const controller = new AbortController();
+            syncStatusAbortController = controller;
+            if (showLoading) syncStatus.value.loading = true;
+            try {
+                const res = await axios.get('/api/sync-status/list', {
+                    params: { host, _: Date.now() },
+                    signal: controller.signal,
+                });
+                if (syncStatus.value.show && syncStatus.value.host === host) {
+                    syncStatus.value.list = res?.data?.data?.list || [];
+                }
+            } catch (e) {
+                if (syncStatus.value.show && syncStatus.value.host === host && showLoading) {
+                    syncStatus.value.list = [];
+                }
+            } finally {
+                if (syncStatus.value.host === host) syncStatus.value.loading = false;
+                if (syncStatusAbortController === controller) {
+                    syncStatusAbortController = null;
+                }
+            }
+        };
+
+        const openSyncStatus = (row) => {
+            stopSyncStatusPolling();
+            syncStatus.value = { show: true, loading: true, host: row.host, list: [] };
+            loadSyncStatus(row.host, true);
+            syncStatusTimer = window.setInterval(() => {
+                if (syncStatus.value.show) loadSyncStatus(row.host);
+            }, 2000);
+        };
+
+        const changeSyncStatusVisible = (visible) => {
+            syncStatus.value.show = visible;
+            if (!visible) stopSyncStatusPolling();
         };
 
         const statusProgress = (item) => {
@@ -206,6 +246,10 @@ export default {
 
         onMounted(() => {
             getList();
+        });
+
+        onBeforeUnmount(() => {
+            stopSyncStatusPolling();
         });
 
         return () => (<div className="padding-20">
@@ -285,25 +329,32 @@ export default {
             </el-dialog>
             <el-dialog
                 modelValue={syncStatus.value.show}
-                onUpdate:modelValue={e => { syncStatus.value.show = e; }}
+                onUpdate:modelValue={changeSyncStatusVisible}
                 title={`同步状态：${syncStatus.value.host}`}
-                width="1080"
+                width="900px"
+                top="8vh"
+                style={{ maxWidth: 'calc(100vw - 32px)' }}
             >
-                <div v-loading={syncStatus.value.loading} style="min-height: 120px;">
+                <div v-loading={syncStatus.value.loading} style="min-height: 120px; max-height: 72vh; overflow: hidden;">
                     {syncStatus.value.list.length === 0 && !syncStatus.value.loading ? (
                         <el-empty description="当前没有未完成或失败的同步任务" />
                     ) : (
-                        <el-table data={syncStatus.value.list} style={{ width: '100%' }} class="table-header">
-                            <el-table-column prop="repository" label="目标仓库" min-width="220" />
-                            <el-table-column prop="reference" label="镜像版本" width="180" />
-                            <el-table-column label="状态" width="130">
+                        <el-table
+                            data={syncStatus.value.list}
+                            max-height="65vh"
+                            style={{ width: '100%' }}
+                            class="table-header"
+                        >
+                            <el-table-column prop="repository" label="目标仓库" min-width="150" show-overflow-tooltip />
+                            <el-table-column prop="reference" label="镜像版本" min-width="110" show-overflow-tooltip />
+                            <el-table-column label="状态" width="90">
                                 {{ default: (scope) => (
                                     <el-tag type={scope.row.status === 'failed' ? 'danger' : 'primary'}>
                                         {scope.row.status === 'failed' ? '同步失败' : '同步中'}
                                     </el-tag>
                                 ) }}
                             </el-table-column>
-                            <el-table-column label="进度" min-width="280">
+                            <el-table-column label="进度" min-width="190">
                                 {{ default: (scope) => {
                                     const completed = scope.row.completed_blobs?.length || 0;
                                     const total = scope.row.expected_blobs?.length || 0;
@@ -313,10 +364,10 @@ export default {
                                     </div>;
                                 } }}
                             </el-table-column>
-                            <el-table-column label="失败信息" min-width="240">
+                            <el-table-column label="失败信息" min-width="150" show-overflow-tooltip>
                                 {{ default: (scope) => scope.row.error || Object.values(scope.row.failed_blobs || {}).join('; ') || '-' }}
                             </el-table-column>
-                            <el-table-column label="更新时间" width="190">
+                            <el-table-column label="更新时间" width="160">
                                 {{ default: (scope) => scope.row.updated_at ? new Date(scope.row.updated_at).toLocaleString() : '-' }}
                             </el-table-column>
                         </el-table>

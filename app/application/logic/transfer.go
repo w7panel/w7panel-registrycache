@@ -170,6 +170,12 @@ func (l Transfer) Push(transferInfo TransferInfo) {
 		return
 	}
 
+	// A transfer is considered started once it has been accepted into the queue.
+	// At this point the manifest has not been parsed yet, so blob details are
+	// populated by the later started event in copyImage.
+	facade.GetEvent().Publish(TransferLifecycleStarted, TransferLifecyclePayload{
+		Event: l.startedLifecycleEvent(transferInfo),
+	})
 	transferChan <- transferInfo
 }
 
@@ -178,7 +184,15 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 
 	defer transferMap.Delete(l.transferKey(transferInfo))
 
+	startedEvent := l.startedLifecycleEvent(transferInfo)
+
 	err := l.transferImage(transferInfo)
+	if err != nil {
+		// copyImage also reports failures after the manifest has been prepared.
+		// Publishing here additionally covers failures during client creation or
+		// manifest download; duplicate failure updates are harmless.
+		facade.GetEvent().Publish(TransferLifecycleFailed, TransferLifecyclePayload{Event: startedEvent, Err: err})
+	}
 
 	if err == nil {
 		err = Storage{}.UpdateRepositoryFile(transferInfo.CacheSetting.Host, transferInfo.RepositoryName, transferInfo.Reference)
@@ -192,6 +206,16 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 	}
 
 	slog.Info("transfer CompleteMultipartUpload", "transfer_info", transferInfo, "err", err)
+}
+
+func (l Transfer) startedLifecycleEvent(transferInfo TransferInfo) TransferLifecycleEvent {
+	return TransferLifecycleEvent{
+		TransferInfo:     transferInfo,
+		SourceRepository: transferInfo.RepositoryName,
+		TargetRepository: l.RebuildImageName(transferInfo.RepositoryName, transferInfo.CacheSetting.CacheRegistry.CacheNamespacePrefix),
+		Reference:        transferInfo.Reference,
+		Blobs:            []distribution.Descriptor{},
+	}
 }
 
 func (l Transfer) transferKey(transferInfo TransferInfo) string {
