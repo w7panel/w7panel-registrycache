@@ -331,7 +331,7 @@ export default {
                 modelValue={syncStatus.value.show}
                 onUpdate:modelValue={changeSyncStatusVisible}
                 title={`同步状态：${syncStatus.value.host}`}
-                width="900px"
+                width="980px"
                 top="8vh"
                 style={{ maxWidth: 'calc(100vw - 32px)' }}
             >
