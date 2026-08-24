@@ -105,7 +105,7 @@ func (l *RegistrySyncStatusLifecycle) RegisterEvents() error {
 
 func (l *RegistrySyncStatusLifecycle) Started(_ context.Context, event TransferLifecycleEvent) error {
 	status := RegistrySyncStatus{
-		Repository:           event.TargetRepository,
+		Repository:           event.SourceRepository,
 		Reference:            event.Reference,
 		SourceManifestDigest: event.SourceManifestDigest,
 		Status:               "syncing",

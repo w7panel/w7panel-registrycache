@@ -345,11 +345,26 @@ export default {
                             style={{ width: '100%' }}
                             class="table-header"
                         >
-                            <el-table-column prop="repository" label="目标仓库" min-width="150" show-overflow-tooltip />
-                            <el-table-column prop="reference" label="镜像版本" min-width="110" show-overflow-tooltip />
-                            <el-table-column label="状态" width="90">
+                            <el-table-column label="目标仓库" min-width="150">
                                 {{ default: (scope) => (
-                                    <el-tag type={scope.row.status === 'failed' ? 'danger' : 'primary'}>
+                                    <el-tooltip
+                                        content={scope.row.repository || '-'}
+                                        placement="top-start"
+                                        teleported={true}
+                                    >
+                                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {scope.row.repository || '-'}
+                                        </span>
+                                    </el-tooltip>
+                                ) }}
+                            </el-table-column>
+                            <el-table-column prop="reference" label="镜像版本" min-width="110" show-overflow-tooltip />
+                            <el-table-column label="状态" width="110">
+                                {{ default: (scope) => (
+                                    <el-tag
+                                        type={scope.row.status === 'failed' ? 'danger' : 'primary'}
+                                        style={{ whiteSpace: 'nowrap' }}
+                                    >
                                         {scope.row.status === 'failed' ? '同步失败' : '同步中'}
                                     </el-tag>
                                 ) }}
