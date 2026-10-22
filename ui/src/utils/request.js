@@ -19,7 +19,7 @@ axios.interceptors.request.use(
 
         const paneltoken = config.customToken || window.$wujie?.props?.paneltoken;
         if (paneltoken) {
-            config.headers.authorizationx = 'bearer ' + paneltoken;
+            config.headers.authorization = 'Bearer ' + paneltoken;
         }
         return config
     },
