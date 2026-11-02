@@ -185,6 +185,7 @@ export default {
                 group: group,
                 cache_storage_registry: repositoryToCacheRegistry(activeCacheRepository()),
                 repository_cache_rules: refCache.value.form.cache_rules || [],
+                blacklist_rules: refCache.value.form.blacklist_rules || [],
                 registry_sources: registrySources,
                 origin_registry: originRegistry,
                 extra: {
@@ -259,14 +260,13 @@ export default {
                     <ImageCache
                         ref={refCache}
                         data={appData.value}
-                    ></ImageCache>
-                    <div class="mt-30">
-                        <div class="b mb-16">源站信息配置</div>
-                        <OriginConfig
-                        ref={refOrigin}
-                        data={appData.value}
-                        />
-                    </div>
+                        v-slots={{
+                            default: () => <div class="mt-30">
+                                <div class="b mb-16">源站信息配置</div>
+                                <OriginConfig ref={refOrigin} data={appData.value} />
+                            </div>,
+                        }}
+                    />
                 </el-tab-pane>
                 <el-tab-pane label="缓存镜像仓库配置" name="2">
                     <el-alert

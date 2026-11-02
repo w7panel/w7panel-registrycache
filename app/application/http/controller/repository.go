@@ -4,11 +4,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"gitee.com/we7coreteam/w7-registry-cache/app/application/logic/blacklist"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -29,6 +31,11 @@ func (c Repository) Handler(ctx *gin.Context) {
 	setting := logic.Setting{}.GetStorageCacheSetting(host)
 	if setting == nil || setting.CacheRegistry.ServerUrl == "" {
 		c.JsonResponseWithServerError(ctx, errors.New("缓存仓库配置错误"))
+		return
+	}
+	if repositoryRequestDenied(*setting, ctx.Request.URL.Path, ctx.Query("from"), requestPeerIP(ctx.Request)) {
+		ctx.Header("Docker-Distribution-API-Version", "registry/2.0")
+		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"code": "DENIED", "message": "repository access denied by blacklist"}}})
 		return
 	}
 	if !hasRepositoryUpstream(*setting) {
@@ -468,4 +475,40 @@ func (c Repository) rebuildImageName(imageName string, namespaceSuffix string) s
 	}
 	list[0] = list[0] + "_" + namespaceSuffix
 	return strings.Join(list, "/")
+}
+
+// Extract from the final protocol suffix: repository names may contain reserved words.
+func requestPeerIP(request *http.Request) netip.Addr {
+	peer, err := netip.ParseAddrPort(request.RemoteAddr)
+	if err == nil {
+		return peer.Addr().Unmap()
+	}
+	address, _ := netip.ParseAddr(request.RemoteAddr)
+	return address.Unmap()
+}
+
+func repositoryRequestDenied(setting logic.RegistryCacheSetting, requestPath, mountFrom string, peerIP netip.Addr) bool {
+	context := blacklist.Context{Scope: blacklist.Request, ClientIP: peerIP}
+	if setting.EvaluateBlacklist(context).Denied {
+		return true
+	}
+	context.Repository = mountFrom
+	if mountFrom != "" && setting.EvaluateBlacklist(context).Denied {
+		return true
+	}
+	if !strings.HasPrefix(requestPath, "/v2/") {
+		return false
+	}
+	name := strings.TrimPrefix(requestPath, "/v2/")
+	end := -1
+	for _, suffix := range []string{"/manifests/", "/blobs/", "/tags/list", "/referrers/"} {
+		if i := strings.LastIndex(name, suffix); i > end {
+			end = i
+		}
+	}
+	if end <= 0 {
+		return false
+	}
+	context.Repository = name[:end]
+	return setting.EvaluateBlacklist(context).Denied
 }

@@ -3,9 +3,10 @@ import { Plus } from '@element-plus/icons-vue'
 
 export default {
     props: ['data'], 
-    setup(props, {expose}){
+    setup(props, {expose, slots}){
         const form = ref({
             cache_rules: [],
+            blacklist_rules: [],
             registry_sources: [],
         });
         const setProxy = ref({
@@ -33,6 +34,9 @@ export default {
         },{
             immediate: true
         })
+        watch(() => props.data.blacklist_rules, (value) => {
+            form.value.blacklist_rules = (value || []).map(rule => ({ ...rule }));
+        }, { immediate: true });
         expose({ form })
 
         return ()=><div className="df df-c">
@@ -243,6 +247,29 @@ export default {
                     </td>
                 </tr>
             </table>
+
+            {slots.default?.()}
+
+            <div class="mt-30">
+                <div className="b">黑名单</div>
+                <el-alert class="mt-16" type="info" closable={false}
+                    title="命中任一启用规则即拒绝请求和缓存（含已有缓存）。命名空间填 xxx；镜像路径填 /xxx/nginx 或 /xxx/*。* 匹配任意字符及多级路径，不包含仓库域名、标签或摘要。" />
+                <table class="com-table mt-16 mb-30">
+                    <thead><tr><td>启用</td><td>规则类型</td><td>匹配表达式</td><td>操作</td></tr></thead>
+                    <tbody>
+                        {form.value.blacklist_rules.map((rule, index) => <tr>
+                            <td><el-switch modelValue={rule.enable} onUpdate:modelValue={value => rule.enable = value} /></td>
+                            <td><el-select modelValue={rule.type} onUpdate:modelValue={value => rule.type = value} style="width:150px">
+                                <el-option label="命名空间" value="namespace" />
+                                <el-option label="镜像路径" value="repository" />
+                            </el-select></td>
+                            <td><el-input modelValue={rule.pattern} onUpdate:modelValue={value => rule.pattern = value} placeholder={rule.type === 'namespace' ? 'xxx' : '/xxx/*'} /></td>
+                            <td><span class="c-blue cursor" onClick={() => form.value.blacklist_rules.splice(index, 1)}>删除</span></td>
+                        </tr>)}
+                        <tr><td colSpan={4} class="txt-c cursor c-blue" onClick={() => form.value.blacklist_rules.push({ type: 'repository', pattern: '', enable: true })}>新增黑名单规则</td></tr>
+                    </tbody>
+                </table>
+            </div>
 
             <el-dialog
                 modelValue={setProxy.value.show}

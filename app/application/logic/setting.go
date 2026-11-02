@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"gitee.com/we7coreteam/w7-registry-cache/app/application/logic/blacklist"
 	"gitee.com/we7coreteam/w7-registry-cache/common/service/registry/types"
 	"github.com/we7coreteam/w7-rangine-go/v2/pkg/support/facade"
 )
@@ -42,6 +43,9 @@ type RegistrySource struct {
 }
 
 type RegistryCacheSetting struct {
+	blacklistEngine      *blacklist.Engine
+	blacklistError       error
+	BlacklistRules       []blacklist.Rule       `json:"blacklist_rules"`
 	Host                 string                 `json:"group"`
 	CacheRegistry        CacheStorageRegistry   `json:"cache_registry"`
 	RepositoryCacheRules []RepositoryCacheRule  `json:"cache_rules"`
@@ -62,6 +66,9 @@ func storageSettingDir() string {
 }
 
 func (l Setting) SetStorageCacheSetting(host string, cacheSetting RegistryCacheSetting) error {
+	if err := blacklist.Validate(cacheSetting.BlacklistRules); err != nil {
+		return err
+	}
 	if cacheSetting.RepositoryCacheRules != nil {
 		sort.Slice(cacheSetting.RepositoryCacheRules, func(i, j int) bool {
 			return cacheSetting.RepositoryCacheRules[i].Weight < cacheSetting.RepositoryCacheRules[j].Weight
@@ -133,6 +140,8 @@ func (l Setting) GetStorageCacheSetting(host string) *RegistryCacheSetting {
 			slog.Error("GetStorageCacheSetting: json.Unmarshal() error(%v)", err)
 			return nil
 		}
+
+		cacheSetting.blacklistEngine, cacheSetting.blacklistError = blacklist.Compile(cacheSetting.BlacklistRules)
 
 		registryClients := registryClientSources(*cacheSetting)
 		if len(registryClients) > 0 {
@@ -336,4 +345,21 @@ func mergeCacheNamespacePrefix(currentPrefix, detectedPrefix string) string {
 	}
 
 	return detectedPrefix + "/" + currentPrefix
+}
+
+func (s RegistryCacheSetting) EvaluateBlacklist(ctx blacklist.Context) blacklist.Decision {
+	engine, err := s.blacklistEngine, s.blacklistError
+	if engine == nil && err == nil {
+		engine, err = blacklist.Compile(s.BlacklistRules)
+	}
+	if err != nil {
+		// Persisted invalid rules fail closed; saves validate before writing.
+		return blacklist.Decision{Denied: true, RuleIndex: -1, Err: err}
+	}
+	return engine.Evaluate(ctx)
+}
+
+// RepositoryDenied is the cache-policy convenience entry point.
+func (s RegistryCacheSetting) RepositoryDenied(repository string) bool {
+	return s.EvaluateBlacklist(blacklist.Context{Scope: blacklist.Cache, Repository: repository}).Denied
 }

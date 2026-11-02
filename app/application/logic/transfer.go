@@ -185,6 +185,10 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 	defer transferMap.Delete(l.transferKey(transferInfo))
 
 	startedEvent := l.startedLifecycleEvent(transferInfo)
+	if transferRepositoryDenied(transferInfo) {
+		facade.GetEvent().Publish(TransferLifecycleFailed, TransferLifecyclePayload{Event: startedEvent, Err: errors.New("repository denied by blacklist")})
+		return
+	}
 
 	err := l.transferImage(transferInfo)
 	if err != nil {
@@ -557,4 +561,12 @@ func (l Transfer) Loop() {
 			}
 		}
 	}()
+}
+
+func transferRepositoryDenied(info TransferInfo) bool {
+	setting := Setting{}.GetStorageCacheSetting(info.CacheSetting.Host)
+	if setting == nil {
+		setting = &info.CacheSetting
+	}
+	return setting.RepositoryDenied(info.RepositoryName)
 }
