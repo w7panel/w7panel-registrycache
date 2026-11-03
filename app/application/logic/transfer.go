@@ -14,6 +14,7 @@ import (
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/manifest/manifestlist"
 	"github.com/docker/distribution/manifest/schema2"
+	"github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/panjf2000/ants/v2"
 	"github.com/we7coreteam/w7-rangine-go/v2/pkg/support/facade"
@@ -185,12 +186,8 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 	defer transferMap.Delete(l.transferKey(transferInfo))
 
 	startedEvent := l.startedLifecycleEvent(transferInfo)
-	if transferRepositoryDenied(transferInfo) {
-		facade.GetEvent().Publish(TransferLifecycleFailed, TransferLifecyclePayload{Event: startedEvent, Err: errors.New("repository denied by blacklist")})
-		return
-	}
 
-	err := l.transferImage(transferInfo)
+	manifestDigest, err := l.transferImage(transferInfo)
 	if err != nil {
 		// copyImage also reports failures after the manifest has been prepared.
 		// Publishing here additionally covers failures during client creation or
@@ -199,7 +196,10 @@ func (l Transfer) transfer(transferInfo TransferInfo) {
 	}
 
 	if err == nil {
-		err = Storage{}.UpdateRepositoryFile(transferInfo.CacheSetting.Host, transferInfo.RepositoryName, transferInfo.Reference)
+		err = (Storage{}).UpdateRepositoryFile(transferInfo.CacheSetting.Host, transferInfo.RepositoryName, transferInfo.Reference)
+		if err == nil {
+			err = enqueueTransferredCacheExpiration(transferInfo, manifestDigest)
+		}
 	} else if transferInfo.CurReTryNum < 10 {
 		go func() {
 			time.Sleep(6 * time.Second)
@@ -226,23 +226,30 @@ func (l Transfer) transferKey(transferInfo TransferInfo) string {
 	return transferInfo.CacheSetting.Host + ":" + transferInfo.RepositoryName + ":" + transferInfo.Reference
 }
 
-func (l Transfer) transferImage(transferInfo TransferInfo) error {
+func (l Transfer) transferImage(transferInfo TransferInfo) (string, error) {
 	sourceRegistryClient := RegistryClient{}.GetRegistryClient(transferInfo.CacheSetting.Host, transferInfo.SourceRegistryServerUrl, nil)
 	if sourceRegistryClient == nil {
-		return errors.New("source registry client is nil")
+		return "", errors.New("source registry client is nil")
 	}
 
 	cacheRegistryClient := RegistryClient{}.GetRegistryClient(transferInfo.CacheSetting.Host, transferInfo.CacheSetting.CacheRegistry.ServerUrl, nil)
 	if cacheRegistryClient == nil {
-		return errors.New("cache registry client is nil")
+		return "", errors.New("cache registry client is nil")
 	}
 
 	sourceManifest, err := Storage{}.DownloadManifest(context.Background(), sourceRegistryClient.PullManifest, transferInfo.RepositoryName, transferInfo.Reference)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return l.copyImage(sourceRegistryClient, cacheRegistryClient, sourceManifest, transferInfo)
+	if err := l.copyImage(sourceRegistryClient, cacheRegistryClient, sourceManifest, transferInfo); err != nil {
+		return "", err
+	}
+	_, payload, err := sourceManifest.Payload()
+	if err != nil {
+		return "", err
+	}
+	return digest.FromBytes(payload).String(), nil
 }
 
 func (l Transfer) copyImage(sourceRepo, targetRepo client.Client, sourceManifest distribution.Manifest, transferInfo TransferInfo) (resultErr error) {
@@ -561,12 +568,4 @@ func (l Transfer) Loop() {
 			}
 		}
 	}()
-}
-
-func transferRepositoryDenied(info TransferInfo) bool {
-	setting := Setting{}.GetStorageCacheSetting(info.CacheSetting.Host)
-	if setting == nil {
-		setting = &info.CacheSetting
-	}
-	return setting.RepositoryDenied(info.RepositoryName)
 }

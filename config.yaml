@@ -30,3 +30,6 @@ database:
 setting:
   oauth_token: ${OAUTH_TOKEN-rogtdpxguk}
   registry_cache_dir: ${REGISTRY_CACHE_DIR-/tmp/registry/cache}
+cache:
+  cleanup:
+    queue_dir: ${CACHE_CLEANUP_QUEUE_DIR-}

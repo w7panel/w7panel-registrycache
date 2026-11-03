@@ -13,6 +13,8 @@ import (
 	"github.com/mitchellh/mapstructure"
 )
 
+var repositoryPolicyRegex = regexp.MustCompile(`^/v2/(.+)/(?:manifests/[^/]+|blobs/(?:uploads(?:/.*)?|[^/]+)|tags/list|referrers/[^/]+)$`)
+
 var manifestRegex = regexp.MustCompile(`^/v2/(?P<image_name>.+?)/manifests/(?P<image_reference>[^/]+)$`)
 var blobRegex = regexp.MustCompile(`^/v2/(?P<image_name>.+?)/blobs/(?P<image_reference>[^/]+)$`)
 var blobUploadProxyRegex = regexp.MustCompile(`^/v2/(?P<image_name>.+?)(?P<suffix>/blobs/uploads(?:/.*)?)$`)

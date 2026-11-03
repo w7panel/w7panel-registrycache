@@ -14,6 +14,9 @@ type Provider struct {
 }
 
 func (p Provider) Register(httpServer *httpServer.Server) {
+	if err := logic.StartCacheExpirationWorker(); err != nil {
+		panic(err)
+	}
 	statusLifecycle := logic.NewRegistrySyncStatusLifecycle()
 	if err := statusLifecycle.RegisterEvents(); err != nil {
 		panic(err)

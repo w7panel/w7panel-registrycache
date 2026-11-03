@@ -42,6 +42,8 @@ spec:
               value: {{ .Values.OAUTH_TOKEN }}
             - name: SQLITE_DIR
               value: /home/registry-cache/db/
+            - name: CACHE_CLEANUP_QUEUE_DIR
+              value: /home/registry-cache/db/
             - name: REGISTRY_CACHE_DIR
               value: /home/registry-cache/cache/
           volumeMounts:

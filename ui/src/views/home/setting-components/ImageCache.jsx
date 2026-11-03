@@ -3,10 +3,9 @@ import { Plus } from '@element-plus/icons-vue'
 
 export default {
     props: ['data'], 
-    setup(props, {expose, slots}){
+    setup(props, {expose}){
         const form = ref({
             cache_rules: [],
-            blacklist_rules: [],
             registry_sources: [],
         });
         const setProxy = ref({
@@ -34,16 +33,13 @@ export default {
         },{
             immediate: true
         })
-        watch(() => props.data.blacklist_rules, (value) => {
-            form.value.blacklist_rules = (value || []).map(rule => ({ ...rule }));
-        }, { immediate: true });
         expose({ form })
 
         return ()=><div className="df df-c">
             <div className="b">缓存规则</div>
             <table class="com-table mt-16 mb-30">
                 <tr>
-                    <td>是否缓存</td>
+                    <td><el-tooltip content="缓存：代理并缓存；不缓存：仅代理转发；禁止访问：拒绝请求，不读取缓存或代理转发。"><span>缓存策略</span></el-tooltip></td>
                     <td>
                         <el-tooltip content="0值为永不过期">
                             <span>
@@ -68,10 +64,15 @@ export default {
                 {
                     form.value?.cache_rules?.map((i,index)=><tr>
                         <td>
-                            <el-switch
-                                modelValue={i.enable}
-                                onUpdate:modelValue={v => i.enable = v}
-                            ></el-switch>
+                            <el-select
+                                modelValue={i.deny ? 'deny' : (i.enable ? 'cache' : 'proxy')}
+                                onUpdate:modelValue={value => { i.deny = value === 'deny'; i.enable = value === 'cache'; }}
+                                style="width:120px;"
+                            >
+                                <el-option label="缓存" value="cache" />
+                                <el-option label="不缓存" value="proxy" />
+                                <el-option label="禁止访问" value="deny" />
+                            </el-select>
                         </td>
                         <td>
                             <el-input
@@ -91,14 +92,14 @@ export default {
                                     class="next-input-select"
                                 >
                                     <el-option label="全部" value="all"></el-option>
-                                    <el-option label="精准匹配" value="fix"></el-option>
-                                    <el-option label="前缀匹配" value="prefix"></el-option>
+                                    <el-option label="镜像目录" value="prefix"></el-option>
+                                    <el-option label="镜像后缀" value="suffix"></el-option>
                                     <el-option label="正则匹配" value="regex"></el-option>
                                 </el-select>
                                 <el-input-tag
                                     modelValue={i.repository_name}
                                     onUpdate:modelValue={v =>i.repository_name = v}
-                                    placeholder="请输入"
+                                    placeholder={i.cache_type === 'suffix' ? '如 nginx、-alpine' : '请输入'}
                                     disabled={i.cache_type=='all'}
                                     class="pre-select-input"
                                     style="width:215px;"
@@ -142,6 +143,7 @@ export default {
                             cache_type: 'all',
                             cache_ttl: 0,
                             enable: false,
+                            deny: false,
                             repository_name: [],
                             weight: 0,
                             assign_registry: '',
@@ -247,34 +249,6 @@ export default {
                     </td>
                 </tr>
             </table>
-
-            {slots.default?.()}
-
-            <div class="mt-30">
-                <div className="b mb-16">黑名单</div>
-                <el-alert type="info" closable={false}
-                    title="命中任一启用规则即拒绝请求和缓存（含已有缓存）。命名空间填 xxx；镜像路径填 /xxx/nginx 或 /xxx/*。* 匹配任意字符及多级路径，不包含仓库域名、标签或摘要。" />
-                <table class="com-table mt-16 mb-30">
-                    <tr><td>启用</td><td>规则类型</td><td>匹配表达式</td><td>操作</td></tr>
-                    {form.value.blacklist_rules.map((rule, index) => <tr>
-                        <td><el-switch modelValue={rule.enable} onUpdate:modelValue={value => rule.enable = value} /></td>
-                        <td><el-select modelValue={rule.type} onUpdate:modelValue={value => rule.type = value} style="width:150px">
-                            <el-option label="命名空间" value="namespace" />
-                            <el-option label="镜像路径" value="repository" />
-                        </el-select></td>
-                        <td><el-input modelValue={rule.pattern} onUpdate:modelValue={value => rule.pattern = value} placeholder={rule.type === 'namespace' ? 'xxx' : '/xxx/*'} /></td>
-                        <td><span class="c-blue cursor" onClick={() => form.value.blacklist_rules.splice(index, 1)}>删除</span></td>
-                    </tr>)}
-                    <tr className="bgrow">
-                        <td colSpan={4} className="txt-c cursor c-99" onClick={() => form.value.blacklist_rules.push({ type: 'repository', pattern: '', enable: true })}>
-                            <div class="df ai-c jc-c">
-                                <el-icon class="c-99"><Plus /></el-icon>
-                                <span class="c-99 ml-4">新增</span>
-                            </div>
-                        </td>
-                    </tr>
-                </table>
-            </div>
 
             <el-dialog
                 modelValue={setProxy.value.show}

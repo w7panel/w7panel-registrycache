@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"gitee.com/we7coreteam/w7-registry-cache/app/application/logic/blacklist"
 	"strings"
 
 	"gitee.com/we7coreteam/w7-registry-cache/app/application/logic"
@@ -59,7 +58,6 @@ func (c Setting) CommonList(ctx *gin.Context) {
 
 func (c Setting) Set(ctx *gin.Context) {
 	type ParamsValidate struct {
-		BlacklistRules       []blacklist.Rule            `json:"blacklist_rules"`
 		Host                 string                      `json:"group" binding:"required"`
 		CacheStorageRegistry logic.CacheStorageRegistry  `json:"cache_storage_registry"  binding:"required"`
 		RepositoryCacheRules []logic.RepositoryCacheRule `json:"repository_cache_rules"  binding:"required"`
@@ -72,16 +70,11 @@ func (c Setting) Set(ctx *gin.Context) {
 		return
 	}
 
-	if err := blacklist.Validate(params.BlacklistRules); err != nil {
-		ctx.JSON(400, gin.H{"message": err.Error()})
-		return
-	}
 	host := strings.Split(params.Host, ",")
 	parent := ""
 	for i, item := range host {
 		err := logic.Setting{}.SetStorageCacheSetting(item, logic.RegistryCacheSetting{
 			Host:                 item,
-			BlacklistRules:       params.BlacklistRules,
 			CacheRegistry:        params.CacheStorageRegistry,
 			RepositoryCacheRules: params.RepositoryCacheRules,
 			RegistrySources:      params.RegistrySources,

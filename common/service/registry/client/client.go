@@ -310,7 +310,7 @@ func (c *client) ManifestExist(repository, reference string) (bool, *distributio
 	}
 	resp, err := c.do(req)
 	if err != nil {
-		if err.Error() == types.NotFoundCode {
+		if types.IsNotFound(err) {
 			return false, nil, nil
 		}
 		return false, nil, err
@@ -400,7 +400,7 @@ func (c *client) BlobExist(repository, digest string) (bool, int64, string, erro
 	}
 	resp, err := c.do(req)
 	if err != nil {
-		if err.Error() == types.NotFoundCode {
+		if types.IsNotFound(err) {
 			return false, 0, "", nil
 		}
 		return false, 0, "", err
@@ -749,7 +749,7 @@ func (c *client) do(req *http.Request) (*http.Response, error) {
 		case http.StatusTooManyRequests:
 			code = types.RateLimitCode
 		}
-		return nil, errors.New(fmt.Sprintf("http status code: %d, body: %s", code, string(body)))
+		return nil, &types.HTTPError{StatusCode: resp.StatusCode, Code: code, Body: string(body)}
 	}
 	return resp, nil
 }

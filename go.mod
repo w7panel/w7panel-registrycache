@@ -16,7 +16,10 @@ require (
 
 require github.com/gookit/color v1.5.3 // indirect
 
-require github.com/spf13/cobra v1.7.0 // indirect
+require (
+	github.com/spf13/cobra v1.8.1 // indirect
+	gorm.io/datatypes v1.1.1-0.20230130040222-c43177d3cf8c // indirect
+)
 
 require (
 	github.com/docker/distribution v2.8.2-beta.1+incompatible
@@ -87,6 +90,7 @@ require (
 	github.com/we7coreteam/gorm-gen-yaml v1.0.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xo/terminfo v0.0.0-20210125001918-ca9a967f8778 // indirect
+	go.etcd.io/bbolt v1.4.3
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect

@@ -4,13 +4,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"gitee.com/we7coreteam/w7-registry-cache/app/application/logic/blacklist"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -33,9 +31,7 @@ func (c Repository) Handler(ctx *gin.Context) {
 		c.JsonResponseWithServerError(ctx, errors.New("缓存仓库配置错误"))
 		return
 	}
-	if repositoryRequestDenied(*setting, ctx.Request.URL.Path, ctx.Query("from"), requestPeerIP(ctx.Request)) {
-		ctx.Header("Docker-Distribution-API-Version", "registry/2.0")
-		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"code": "DENIED", "message": "repository access denied by blacklist"}}})
+	if !applyRepositoryCachePolicy(ctx, *setting) {
 		return
 	}
 	if !hasRepositoryUpstream(*setting) {
@@ -190,8 +186,8 @@ func (c Repository) handlerManifest(ctx *gin.Context, setting logic.RegistryCach
 
 	repositoryCacheRule, err := cacheRuleLogic.MatchRepositoryCacheRule(reqImageName, setting.RepositoryCacheRules)
 	slog.Info("manifest: match repositoryCacheRule", "params", params, "match_rule", repositoryCacheRule, "err", err)
-	if repositoryCacheRule != nil && repositoryCacheRule.Enable {
-		enableCache = repositoryCacheRule.Enable
+	if repositoryCacheRule != nil && repositoryCacheRule.CacheEnabled() {
+		enableCache = repositoryCacheRule.CacheEnabled()
 		cacheTtl = repositoryCacheRule.CacheTtl
 	}
 
@@ -349,8 +345,8 @@ func (c Repository) handlerBlob(ctx *gin.Context, setting logic.RegistryCacheSet
 
 	repositoryCacheRule, err := cacheRuleLogic.MatchRepositoryCacheRule(reqImageName, setting.RepositoryCacheRules)
 	slog.Info("blob: match repositoryCacheRule", "match_rule", repositoryCacheRule, "params", params, "err", err)
-	if repositoryCacheRule != nil && repositoryCacheRule.Enable {
-		enableCache = repositoryCacheRule.Enable
+	if repositoryCacheRule != nil && repositoryCacheRule.CacheEnabled() {
+		enableCache = repositoryCacheRule.CacheEnabled()
 	}
 
 	exists := false
@@ -477,38 +473,26 @@ func (c Repository) rebuildImageName(imageName string, namespaceSuffix string) s
 	return strings.Join(list, "/")
 }
 
-// Extract from the final protocol suffix: repository names may contain reserved words.
-func requestPeerIP(request *http.Request) netip.Addr {
-	peer, err := netip.ParseAddrPort(request.RemoteAddr)
-	if err == nil {
-		return peer.Addr().Unmap()
-	}
-	address, _ := netip.ParseAddr(request.RemoteAddr)
-	return address.Unmap()
-}
-
-func repositoryRequestDenied(setting logic.RegistryCacheSetting, requestPath, mountFrom string, peerIP netip.Addr) bool {
-	context := blacklist.Context{Scope: blacklist.Request, ClientIP: peerIP}
-	if setting.EvaluateBlacklist(context).Denied {
-		return true
-	}
-	context.Repository = mountFrom
-	if mountFrom != "" && setting.EvaluateBlacklist(context).Denied {
-		return true
-	}
-	if !strings.HasPrefix(requestPath, "/v2/") {
-		return false
-	}
-	name := strings.TrimPrefix(requestPath, "/v2/")
-	end := -1
-	for _, suffix := range []string{"/manifests/", "/blobs/", "/tags/list", "/referrers/"} {
-		if i := strings.LastIndex(name, suffix); i > end {
-			end = i
+// Enforce policy before either the cache reads or reverse proxy can run.
+func applyRepositoryCachePolicy(ctx *gin.Context, setting logic.RegistryCacheSetting) bool {
+	names := []string{}
+	if matches := repositoryPolicyRegex.FindStringSubmatch(ctx.Request.URL.Path); matches != nil {
+		names = append(names, matches[1])
+		if from := ctx.Query("from"); from != "" {
+			names = append(names, from)
 		}
 	}
-	if end <= 0 {
-		return false
+	for _, name := range names {
+		denied, err := (logic.CacheRule{}).RepositoryAccessDenied(name, setting.RepositoryCacheRules)
+		if err != nil {
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"errors": []gin.H{{"code": "UNKNOWN", "message": "invalid cache policy"}}})
+			return false
+		}
+		if denied {
+			ctx.Header("Docker-Distribution-API-Version", "registry/2.0")
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"errors": []gin.H{{"code": "DENIED", "message": "repository access denied by cache policy"}}})
+			return false
+		}
 	}
-	context.Repository = name[:end]
-	return setting.EvaluateBlacklist(context).Denied
+	return true
 }
